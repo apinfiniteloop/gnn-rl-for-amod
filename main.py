@@ -27,7 +27,7 @@ parser.add_argument('--beta', type=int, default=0.5, metavar='S',
 # Model parameters
 parser.add_argument('--test', type=bool, default=False,
                     help='activates test mode for agent evaluation')
-parser.add_argument('--cplexpath', type=str, default='/opt/ibm/ILOG/CPLEX_Studio128/opl/bin/x86-64_linux/',
+parser.add_argument('--cplexpath', type=str, default='C:/Program Files/IBM/ILOG/CPLEX_Studio2211/opl/bin/x64_win64/',
                     help='defines directory of the CPLEX installation')
 parser.add_argument('--directory', type=str, default='saved_files',
                     help='defines directory where to save files')

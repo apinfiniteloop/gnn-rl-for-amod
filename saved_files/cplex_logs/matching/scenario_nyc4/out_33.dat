@@ -1,8 +1,9 @@
 
 <<< setup
 
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
 Tried aggregator 1 time.
-LP Presolve eliminated 106 rows and 90 columns.
+LP Presolve eliminated 120 rows and 104 columns.
 All rows and columns eliminated.
 Presolve time = 0.00 sec. (0.04 ticks)
 main returns 0

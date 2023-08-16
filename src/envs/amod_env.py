@@ -233,7 +233,7 @@ class Scenario:
     def __init__(self, N1=2, N2=4, tf=60, sd=None, ninit=5, tripAttr=None, demand_input=None, demand_ratio = None,
                  trip_length_preference = 0.25, grid_travel_time = 1, fix_price=True, alpha = 0.2, json_file = None, json_hr = 9, json_tstep = 2, varying_time=False, json_regions = None):
         # trip_length_preference: positive - more shorter trips, negative - more longer trips
-        # grid_travel_time: travel time between grids
+        # grid_travel_time: travel time between grids TODO: Need to revise travel time. Consider using BPR.
         # demand_input： list - total demand out of each region, 
         #          float/int - total demand out of each region satisfies uniform distribution on [0, demand_input]
         #          dict/defaultdict - total demand between pairs of regions

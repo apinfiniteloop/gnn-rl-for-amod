@@ -1,13 +1,14 @@
 
 <<< setup
 
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
 Tried aggregator 1 time.
-LP Presolve eliminated 126 rows and 95 columns.
-Reduced LP has 2 rows, 17 columns, and 17 nonzeros.
+LP Presolve eliminated 113 rows and 79 columns.
+Reduced LP has 2 rows, 20 columns, and 20 nonzeros.
 Presolve time = 0.00 sec. (0.05 ticks)
 
 Iteration log . . .
-Iteration:     1   Dual objective     =          1695.750385
+Iteration:     1   Dual objective     =          1779.434064
 main returns 0
 
 <<< main
