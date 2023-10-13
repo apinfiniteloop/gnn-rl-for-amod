@@ -2,11 +2,11 @@
 <<< setup
 
 Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
-Found incumbent of value 1891.000000 after 0.00 sec. (0.01 ticks)
 Tried aggregator 1 time.
 Reduced MIP has 32 rows, 240 columns, and 720 nonzeros.
 Reduced MIP has 0 binaries, 240 generals, 0 SOSs, and 0 indicators.
 Presolve time = 0.00 sec. (0.34 ticks)
+Found incumbent of value 2488.000000 after 0.00 sec. (1.12 ticks)
 Tried aggregator 1 time.
 Detecting symmetries...
 Reduced MIP has 32 rows, 240 columns, and 720 nonzeros.
@@ -14,25 +14,25 @@ Reduced MIP has 0 binaries, 240 generals, 0 SOSs, and 0 indicators.
 Presolve time = 0.00 sec. (0.38 ticks)
 MIP emphasis: balance optimality and feasibility.
 MIP search method: dynamic search.
-Parallel mode: deterministic, using up to 12 threads.
-Root relaxation solution time = 0.00 sec. (0.19 ticks)
+Parallel mode: deterministic, using up to 16 threads.
+Root relaxation solution time = 0.00 sec. (0.17 ticks)
 
         Nodes                                         Cuts/
    Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
 
-*     0+    0                         1891.0000        0.0000           100.00%
-*     0+    0                         1858.0000        0.0000           100.00%
-*     0     0      integral     0      968.0000      968.0000       26    0.00%
-Elapsed time = 0.00 sec. (1.16 ticks, tree = 0.00 MB, solutions = 3)
+*     0+    0                         2488.0000        0.0000           100.00%
+*     0+    0                         2383.0000        0.0000           100.00%
+*     0     0      integral     0     1195.0000     1195.0000       21    0.00%
+Elapsed time = 0.00 sec. (1.84 ticks, tree = 0.00 MB, solutions = 3)
 
 Root node processing (before b&c):
-  Real time             =    0.00 sec. (1.17 ticks)
-Parallel b&c, 12 threads:
+  Real time             =    0.00 sec. (1.85 ticks)
+Parallel b&c, 16 threads:
   Real time             =    0.00 sec. (0.00 ticks)
   Sync time (average)   =    0.00 sec.
   Wait time (average)   =    0.00 sec.
                           ------------
-Total (root+branch&cut) =    0.00 sec. (1.17 ticks)
+Total (root+branch&cut) =    0.00 sec. (1.85 ticks)
 main returns 0
 
 <<< main

@@ -148,3 +148,12 @@ else:
     
     
 
+# def solve(first_run: bool, env, res_path, desiredAcc, CPLEXPATH) -> tuple:
+#     ret = tuple()
+#     if not first_run:
+#         rebAction = solveRebFlow(env, res_path, desiredAcc, CPLEXPATH)
+#     obs, paxreward, done, info = env.pax_step(CPLEXPATH=CPLEXPATH, PATH=res_path)
+#     ret.append((obs, paxreward, done, info))
+#     if not first_run:
+#         ret.append(rebAction)
+#     return ret

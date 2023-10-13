@@ -3,37 +3,37 @@
 
 Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
 Tried aggregator 1 time.
-MIP Presolve eliminated 4 rows and 56 columns.
-Reduced MIP has 28 rows, 184 columns, and 524 nonzeros.
-Reduced MIP has 0 binaries, 184 generals, 0 SOSs, and 0 indicators.
-Presolve time = 0.00 sec. (0.37 ticks)
-Found incumbent of value 1309.000000 after 0.00 sec. (0.80 ticks)
+MIP Presolve eliminated 3 rows and 43 columns.
+Reduced MIP has 29 rows, 197 columns, and 576 nonzeros.
+Reduced MIP has 0 binaries, 197 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.00 sec. (0.39 ticks)
+Found incumbent of value 741.000000 after 0.00 sec. (2.11 ticks)
 Tried aggregator 1 time.
 Detecting symmetries...
-Reduced MIP has 28 rows, 184 columns, and 524 nonzeros.
-Reduced MIP has 0 binaries, 184 generals, 0 SOSs, and 0 indicators.
-Presolve time = 0.00 sec. (0.26 ticks)
+Reduced MIP has 29 rows, 197 columns, and 576 nonzeros.
+Reduced MIP has 0 binaries, 197 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.00 sec. (0.29 ticks)
 MIP emphasis: balance optimality and feasibility.
 MIP search method: dynamic search.
-Parallel mode: deterministic, using up to 12 threads.
-Root relaxation solution time = 0.00 sec. (0.12 ticks)
+Parallel mode: deterministic, using up to 16 threads.
+Root relaxation solution time = 0.00 sec. (0.14 ticks)
 
         Nodes                                         Cuts/
    Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
 
-*     0+    0                         1309.0000        0.0000           100.00%
-*     0+    0                         1232.0000        0.0000           100.00%
-*     0     0      integral     0      557.0000      557.0000       18    0.00%
-Elapsed time = 0.00 sec. (1.33 ticks, tree = 0.00 MB, solutions = 3)
+*     0+    0                          741.0000        0.0000           100.00%
+*     0+    0                          512.0000        0.0000           100.00%
+*     0     0      integral     0      456.0000      456.0000       18    0.00%
+Elapsed time = 0.00 sec. (2.69 ticks, tree = 0.00 MB, solutions = 3)
 
 Root node processing (before b&c):
-  Real time             =    0.00 sec. (1.34 ticks)
-Parallel b&c, 12 threads:
+  Real time             =    0.00 sec. (2.70 ticks)
+Parallel b&c, 16 threads:
   Real time             =    0.00 sec. (0.00 ticks)
   Sync time (average)   =    0.00 sec.
   Wait time (average)   =    0.00 sec.
                           ------------
-Total (root+branch&cut) =    0.00 sec. (1.34 ticks)
+Total (root+branch&cut) =    0.00 sec. (2.70 ticks)
 main returns 0
 
 <<< main
