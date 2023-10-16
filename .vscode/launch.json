@@ -5,13 +5,30 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: 当前文件",
+            "name": "Var episode count",
             "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["--max_episodes=16"]
+            "args": ["--max_episodes=${input:episode}"]
+        },
+        {
+            "name": "default",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": []
         }
-    ]
+    ],
+    "inputs": [
+    {
+      "id": "episode",
+      "type": "promptString",
+      "description": "Enter episode count:",
+      "default": "16"
+    }
+  ]
 }
