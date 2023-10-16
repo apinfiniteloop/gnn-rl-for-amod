@@ -15,10 +15,11 @@ class EdgeKeyDict(dict):
 
 class LTM:
     # Link Transmission Model, only consider one O-D pair, and 2 paths. 
-    def __init__(self, network, demand, total_time):
+    def __init__(self, network, demand, paths, total_time):
         self.network = network
-        self.path_demand = demand[0]
-        self.node_demand = demand[1]
+        self.path_demands = demand[0]
+        self.link_demands = demand[1]
+        self.paths = paths
         self.total_time = total_time
         self.N = defaultdict(EdgeKeyDict) # Cumulative Vehicle Number
         self.N = { #Initialize N(x, t) for all edges
@@ -41,22 +42,27 @@ class LTM:
                 t: 0 for t in range(total_time)
             } for edge in self.network.edges
         } # R_i(t) <-> receiving_flow[i][t]
-        self.edge_demand = defaultdict(EdgeKeyDict) # Edge Demand
-        self.edge_demand = { #Initialize edge demand for all edges
-            tuple(edge): {
-                t: 0 for t in range(total_time)
-            } for edge in self.network.edges
-        }
+        # self.edge_demand = defaultdict(EdgeKeyDict) # Edge Demand
+        # self.edge_demand = { #Initialize edge demand for all edges
+        #     tuple(edge): {
+        #         t: 0 for t in range(total_time)
+        #     } for edge in self.network.edges
+        # }
         self.node_transition_demand = defaultdict(EdgeKeyDict) # Node Transition Demand, for storing demand of edge i to edge j, forall i in in_edges and j in out_edges
         self.node_transition_demand = { #Initialize node transition demand for all nodes
             node: {
                 i: {
                     j: {
                         t: 0 for t in range(total_time)
-                    } for j in self.network.out_edges(node)
-                } for i in self.network.in_edges(node)
+                    } for j in self.network.out_edges(node, keys=True)
+                } for i in self.network.in_edges(node, keys=True)
             } for node in self.network.nodes
         }
+        # Calculate node transition demand based on path demand
+        for path_id, path in enumerate(paths):
+            for time in range(total_time):
+                for i in range(len(path)-1):
+                    self.node_transition_demand[path[i][1]][path[i]][path[i+1]][time] += self.path_demands[path_id][time]
 
     def calculate_sending_flow(self, edge, edge_attrib, t):
         # Source nodes and destination nodes don't have 'w' and 'k_j' attribute.
@@ -66,7 +72,7 @@ class LTM:
             return min(self.N[tuple(edge)][t+delta_t-edge_attrib['length']/ffs][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max'])
 
     def calculate_receiving_flow(self, edge, edge_attrib, t):
-        return min(self.N[tuple(edge)][t+delta_t+edge_attrib['length']/edge_attrib['w']]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max'])
+        return min(self.N[tuple(edge)][t+delta_t][1]+edge_attrib['length']/edge_attrib['w']+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max'])
 
     def disaggregate_demand(self, t):
         # # Disaggreagte O-D demand into edge demand
@@ -90,34 +96,36 @@ class LTM:
         #         self.node_transition_demand[node][('C', 'D')][('D', 'De')][t] = self.path_demand[t][1]
 
         # Update node transition demand, is dependent on path.
-        for node in self.network.nodes:
-            for in_edge in self.network.in_edges(node):
-                for out_edge in self.network.out_edges(node):
-                    self.node_transition_demand[node][in_edge][out_edge][t] = self.link
-
+        return 0
 
     def simulate(self):
-        for t in range(self.total_time):
+        for t in range(self.total_time-1):
+            # Put path demands into the upstream end of the outgoing edges from the source nodes.
+            # for path_id, path in enumerate(paths):
+            #     incoming_link = [edge for edge in self.network.in_edges(path[0][0], keys=True) if self.network.edges[edge]['type'] == 'origin'][0]
+            #     self.N[tuple(incoming_link)][t][0] += self.path_demands[t][path_id]
             for node in self.network.nodes:
                 # For each node, calculate the sending flow and receiving flow of its connected edges
                 for edge in self.network.edges(nbunch=node, keys=True):
+                    if self.network.edges[edge]['type'] == 'origin' or self.network.edges[edge]['type'] == 'destination':
+                        continue
                     self.sending_flow[tuple(edge)][t] = self.calculate_sending_flow(edge, self.network.edges[edge], t)
                     self.receiving_flow[tuple(edge)][t] = self.calculate_receiving_flow(edge, self.network.edges[edge], t)
                 # Determine node's incoming and outgoing edges count
-                in_edges = self.network.in_edges(node)
-                out_edges = self.network.out_edges(node)
+                in_edges = self.network.in_edges(node, keys=True)
+                out_edges = self.network.out_edges(node, keys=True)
                 # If is origin node, update N(x, t) for outgoing edges
                 if len(in_edges) == 0 and len(out_edges) == 1:
                     # Need to revise later for considering multiple origins
-                    transition_flow = min(self.path_demand[t+delta_t][0] + self.path_demand[t+delta_t][1]-self.N(out_edges[0], t)[0], self.receiving_flow[tuple(out_edges[0])][t])
-                    self.N[out_edges[0]][t+delta_t][0] = self.N[out_edges[0]][t][0] + transition_flow
+                    transition_flow = min(sum([self.path_demands[i][t+delta_t] for i in self.path_demands.keys()])-self.N[tuple(out_edges)[0]][t][0], self.receiving_flow[tuple(out_edges)[0]][t])
+                    self.N[tuple(out_edges)[0]][t+delta_t][0] = self.N[tuple(out_edges)[0]][t][0] + transition_flow
                 # If is split node, update N(x, t) for outgoing edges
                 elif len(in_edges) == 1 and len(out_edges) > 1:
                     sum_transition_flow = 0
                     for edge in out_edges:
-                        self.disaggregate_demand(edge, t)
-                        p=self.edge_demand[edge][t]/self.edge_demand[in_edges[0]][t]
-                        transition_flow = p*min(self.sending_flow[in_edges[0]][t], min([self.receiving_flow[e][t]/self.edge_demand[in_edges[0]][t] for e in out_edges]))
+                        # self.disaggregate_demand(edge, t)
+                        p=self.link_demands[edge][t]/self.link_demands[tuple(in_edges)[0]][t]
+                        transition_flow = p*min(self.sending_flow[tuple(in_edges)[0]][t], min([self.receiving_flow[e][t]/self.link_demands[tuple(in_edges)[0]][t] for e in out_edges]))
                         self.N[edge][t+delta_t][0] = self.N[edge][t][0] + transition_flow
                         sum_transition_flow += transition_flow
                     self.N[edge][t+delta_t][1] = self.N[edge][t][1] + sum_transition_flow
@@ -125,9 +133,9 @@ class LTM:
                 elif len(in_edges) > 1 and len(out_edges) == 1:
                     sum_transition_flow = 0
                     for edge in in_edges:
-                        self.disaggregate_demand(edge, t)
-                        p=self.edge_demand[edge][t]/self.edge_demand[out_edges[0]][t]
-                        transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[out_edges[0]][t]-(sum(self.sending_flow[k][t] for k in in_edges)-self.sending_flow[edge][t]), p*self.receiving_flow[out_edges[0]][t]])[1]
+                        # self.disaggregate_demand(edge, t)
+                        p=self.link_demands[edge][t]/self.link_demands[tuple(out_edges)[0]][t]
+                        transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]-(sum(self.sending_flow[k][t] for k in in_edges)-self.sending_flow[edge][t]), p*self.receiving_flow[tuple(out_edges)[0]][t]])[1]
                         self.N[edge][t+delta_t][1] = self.N[edge][t][1] + transition_flow
                         sum_transition_flow += transition_flow
                     self.N[edge][t+delta_t][0] = self.N[edge][t][0] + sum_transition_flow
@@ -163,8 +171,8 @@ def create_sample_network():
     return G
 
 def generate_sample_demand(network, total_time, time_step=1):
-    origin = "Or"
-    destination = "De"
+    origin = "A"
+    destination = "D"
     all_paths = list(nx.all_simple_edge_paths(network, source=origin, target=destination))
 
     # A very simple demand generation function, considering only one O-D pair, and 2 paths. Need to revise later for more complex situations.
@@ -175,16 +183,26 @@ def generate_sample_demand(network, total_time, time_step=1):
         for time, demand in enumerate(demand_values):
             for edge_start, edge_end, edge_key in all_paths[path_id]:
                 link_demands[(edge_start, edge_end, edge_key)][time] += demand
+                # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
+                if edge_start == all_paths[path_id][0][0]:
+                    for edge in network.in_edges(edge_start, keys=True):
+                        if network.edges[edge]['type'] == 'origin':
+                            link_demands[edge][time] += demand
+                # Same for edge_end
+                if edge_end == all_paths[path_id][-1][1]:
+                    for edge in network.out_edges(edge_end, keys=True):
+                        if network.edges[edge]['type'] == 'destination':
+                            link_demands[edge][time] += demand
 
-    return (path_demands, link_demands)
+    return (path_demands, link_demands), all_paths
 
 if __name__ == "__main__":
-    network = create_sample_network()
+    network = create_sample_network()   
 
     total_time = 60 
-    demand = generate_sample_demand(network, total_time)
+    demand, paths = generate_sample_demand(network, total_time)
     # for edge in network.edges:
     #     print(tuple(edge))
-    ltm = LTM(network, demand, total_time)
+    ltm = LTM(network, demand, paths, total_time)
     ltm.simulate()
     print(ltm.N)
