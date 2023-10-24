@@ -66,8 +66,8 @@ class LTM:
 
     def calculate_sending_flow(self, edge, edge_attrib, t):
         # Source nodes and destination nodes don't have 'w' and 'k_j' attribute.
-        if t+1-edge_attrib['length']/ffs < 0:
-            return 0
+        if t+delta_t-edge_attrib['length']/ffs < 0:
+            return min(self.N[tuple(edge)][0][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max'])
         else:
             return min(self.N[tuple(edge)][t+delta_t-edge_attrib['length']/ffs][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max'])
 
@@ -99,6 +99,9 @@ class LTM:
         return 0
 
     def simulate(self):
+        for edge in self.network.edges(keys=True):
+            if self.network.edges[edge]['type'] == 'origin':
+                self.N[edge][0][0] = self.link_demands[edge][0]
         for t in range(self.total_time-1):
             # Put path demands into the upstream end of the outgoing edges from the source nodes.
             # for path_id, path in enumerate(paths):
@@ -106,8 +109,19 @@ class LTM:
             #     self.N[tuple(incoming_link)][t][0] += self.path_demands[t][path_id]
             for node in self.network.nodes:
                 # For each node, calculate the sending flow and receiving flow of its connected edges
-                for edge in self.network.edges(nbunch=node, keys=True):
+                for edge in set(self.network.out_edges(nbunch=node, keys=True)) | set(self.network.in_edges(nbunch=node, keys=True)):
+                    
+                    # if self.network.edges[edge]['type'] == 'origin':
+                    #     self.receiving_flow[tuple(edge)][t] = np.inf
+                    #     continue
+                    # if self.network.edges[edge]['type'] == 'destination':
+                    #     self.sending_flow[tuple(edge)][t] = np.inf
+                    #     continue
+
+                    # Maybe correct? Don't know. Need further testing.
                     if self.network.edges[edge]['type'] == 'origin' or self.network.edges[edge]['type'] == 'destination':
+                        self.sending_flow[tuple(edge)][t] = np.inf
+                        self.receiving_flow[tuple(edge)][t] = np.inf
                         continue
                     self.sending_flow[tuple(edge)][t] = self.calculate_sending_flow(edge, self.network.edges[edge], t)
                     self.receiving_flow[tuple(edge)][t] = self.calculate_receiving_flow(edge, self.network.edges[edge], t)
@@ -119,11 +133,17 @@ class LTM:
                     # Need to revise later for considering multiple origins
                     transition_flow = min(sum([self.path_demands[i][t+delta_t] for i in self.path_demands.keys()])-self.N[tuple(out_edges)[0]][t][0], self.receiving_flow[tuple(out_edges)[0]][t])
                     self.N[tuple(out_edges)[0]][t+delta_t][0] = self.N[tuple(out_edges)[0]][t][0] + transition_flow
+                # If is homogenous node, update N(x, t) for outgoing edges
+                elif len(in_edges) == 1 and len(out_edges) == 1:
+                    transition_flow = min(self.sending_flow[tuple(in_edges)[0]][t], self.receiving_flow[tuple(out_edges)[0]][t])
+                    self.N[tuple(in_edges)[0]][t+delta_t][1] = self.N[tuple(in_edges)[0]][t][1] + transition_flow
                 # If is split node, update N(x, t) for outgoing edges
                 elif len(in_edges) == 1 and len(out_edges) > 1:
                     sum_transition_flow = 0
                     for edge in out_edges:
                         # self.disaggregate_demand(edge, t)
+                        if self.link_demands[tuple(in_edges)[0]][t] == 0:
+                            continue
                         p=self.link_demands[edge][t]/self.link_demands[tuple(in_edges)[0]][t]
                         transition_flow = p*min(self.sending_flow[tuple(in_edges)[0]][t], min([self.receiving_flow[e][t]/self.link_demands[tuple(in_edges)[0]][t] for e in out_edges]))
                         self.N[edge][t+delta_t][0] = self.N[edge][t][0] + transition_flow
@@ -133,6 +153,8 @@ class LTM:
                 elif len(in_edges) > 1 and len(out_edges) == 1:
                     sum_transition_flow = 0
                     for edge in in_edges:
+                        if self.link_demands[tuple(out_edges)[0]][t] == 0:
+                            continue
                         # self.disaggregate_demand(edge, t)
                         p=self.link_demands[edge][t]/self.link_demands[tuple(out_edges)[0]][t]
                         transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]-(sum(self.sending_flow[k][t] for k in in_edges)-self.sending_flow[edge][t]), p*self.receiving_flow[tuple(out_edges)[0]][t]])[1]
