@@ -2,10 +2,11 @@ import networkx as nx
 import random
 import numpy as np
 from collections import defaultdict
+import matplotlib.pyplot as plt
 
 ffs = 0.2 # free flow speed
 delta_t = 1 # time step
-EPS = 1e-6 # epsilon for numerical stability
+# EPS = 1e-6 # epsilon for numerical stability
 
 
 # For storing dicts with edge as key
@@ -71,13 +72,17 @@ class LTM:
         if t+delta_t-edge_attrib['length']/ffs < 0:
             return min(self.N[tuple(edge)][0][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max'])
         else:
-            return min(self.N[tuple(edge)][t+delta_t-edge_attrib['length']/ffs][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max'])
+            return min(self.N[tuple(edge)][t+delta_t-edge_attrib['length']/ffs][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max']*delta_t)
 
     def calculate_receiving_flow(self, edge, edge_attrib, t):
         if edge_attrib['type'] == 'destination':
-            return min(self.N[tuple(edge)][t+delta_t][1]+edge_attrib['length']/edge_attrib['w']-self.N[tuple(edge)][t][0], edge_attrib['q_max'])
+            # return min(self.N[tuple(edge)][t+delta_t][1]+edge_attrib['length']/edge_attrib['w']-self.N[tuple(edge)][t][0], edge_attrib['q_max'])
+            return np.inf
         else:
-            return min(self.N[tuple(edge)][t+delta_t][1]+edge_attrib['length']/edge_attrib['w']+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max'])
+            try:
+                return min(self.N[tuple(edge)][t+delta_t+edge_attrib['length']/edge_attrib['w']][1]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max']*delta_t)
+            except KeyError:
+                return min(self.N[tuple(edge)][total_time-1][1]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max']*delta_t)
 
     def disaggregate_demand(self, t):
         # # Disaggreagte O-D demand into edge demand
@@ -156,9 +161,9 @@ class LTM:
                             transition_flow = p*min(self.sending_flow[tuple(in_edges)[0]][t], min([self.receiving_flow[e][t]/(self.link_demands[e][t]/self.link_demands[tuple(in_edges)[0]][t]) for e in out_edges]))
                         except ZeroDivisionError:
                             transition_flow = 0
-                        self.N[edge][t+delta_t][0] = self.N[edge][t][0] + transition_flow
+                        self.N[edge][t+delta_t][0] = self.N[edge][t][0] + round(transition_flow)
                         sum_transition_flow += transition_flow
-                    self.N[tuple(in_edges)[0]][t+delta_t][1] = self.N[tuple(in_edges)[0]][t][1] + sum_transition_flow
+                    self.N[tuple(in_edges)[0]][t+delta_t][1] = self.N[tuple(in_edges)[0]][t][1] + round(sum_transition_flow)
                 # If is merge node, update N(x, t) for outgoing edges
                 elif len(in_edges) > 1 and len(out_edges) == 1:
                     sum_transition_flow = 0
@@ -167,7 +172,13 @@ class LTM:
                             continue
                         # self.disaggregate_demand(edge, t)
                         p=self.link_demands[edge][t]/self.link_demands[tuple(out_edges)[0]][t]
-                        transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]-(sum(self.sending_flow[k][t] for k in in_edges)-self.sending_flow[edge][t]), p*self.receiving_flow[tuple(out_edges)[0]][t]])[1]
+                        # Daganzo CTM model, lacks disaggregation of sending flow.
+                        # transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]-(sum(self.sending_flow[k][t] for k in in_edges)-self.sending_flow[edge][t]), p*self.receiving_flow[tuple(out_edges)[0]][t]])[1]
+                        # Jin and Zhang fairness model.
+                        try:
+                            transition_flow = min(self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]*self.sending_flow[edge][t]/(sum([self.sending_flow[e][t] for e in in_edges])))
+                        except ZeroDivisionError:
+                            transition_flow = 0
                         self.N[edge][t+delta_t][1] = self.N[edge][t][1] + transition_flow
                         sum_transition_flow += transition_flow
                     self.N[tuple(out_edges)[0]][t+delta_t][0] = self.N[tuple(out_edges)[0]][t][0] + sum_transition_flow
@@ -180,6 +191,15 @@ class LTM:
                             transition_flow = p*min(min([self.receiving_flow[out_edge][t]*self.sending_flow[in_edge][t]/(sum([self.node_transition_demand[node][i][out_edge]*self.sending_flow[i][t] for i in in_edges]))]), self.sending_flow[in_edge][t])
                             self.N[out_edge][t+delta_t][0] = self.N[out_edge][t][0] + transition_flow
                             self.N[in_edge][t+delta_t][1] = self.N[in_edge][t][1] + transition_flow
+    
+    def plot_N(self, edge):
+        plt.scatter([t for t in range(self.total_time)], [self.N[edge][t][0] for t in range(self.total_time)], label='Upstream end')
+        plt.scatter([t for t in range(self.total_time)],[self.N[edge][t][1] for t in range(self.total_time)], label='Downstream end')
+        plt.title("N(x, t) for edge {}".format(edge))
+        plt.xlabel("Time")
+        plt.ylabel("N(x, t)")
+        plt.legend()
+        plt.show()
 
 
 
@@ -195,10 +215,10 @@ def create_sample_network():
 
     # G.add_edge("Or", "A", length=np.inf, q_max=np.inf, type='origin') # k_j, w are 0 now, but is debatable.
     G.add_edge("Or", "A", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type='origin')
-    G.add_edge("A", "B", length=0.4, q_max=20, k_j=300, w=0.1, type='normal')
+    G.add_edge("A", "B", length=0.4, q_max=20, k_j=1000, w=0.1, type='normal')
     G.add_edge("B", "C", length=0.4, q_max=20, k_j=300, w=0.1, type='normal')
-    G.add_edge("C", "D", length=0.8, q_max=2, k_j=60, w=0.1, type='normal')
-    G.add_edge("C", "D", length=0.4, q_max=2, k_j=30, w=0.1, type='normal')
+    G.add_edge("C", "D", length=0.8, q_max=20, k_j=60, w=0.1, type='normal')
+    G.add_edge("C", "D", length=0.4, q_max=20, k_j=30, w=0.1, type='normal')
     # G.add_edge("D", "De", length=np.inf, q_max=np.inf, type='destination') # Same as above
     G.add_edge("D", "De", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type='destination')
 
@@ -239,4 +259,5 @@ if __name__ == "__main__":
     #     print(tuple(edge))
     ltm = LTM(network, demand, paths, total_time)
     ltm.simulate()
-    print(ltm.N)
+    ltm.plot_N(('C', 'D', 0))
+    # print(ltm.N)
