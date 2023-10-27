@@ -154,34 +154,39 @@ class LTM:
                     sum_transition_flow = 0
                     for edge in out_edges:
                         # self.disaggregate_demand(edge, t)
-                        if self.link_demands[tuple(in_edges)[0]][t] == 0:
-                            continue
-                        p=self.link_demands[edge][t]/self.link_demands[tuple(in_edges)[0]][t]
+                        # if self.link_demands[tuple(in_edges)[0]][t] == 0:
+                        #     continue
                         try:
+                            p=self.link_demands[edge][t]/self.link_demands[tuple(in_edges)[0]][t]
                             transition_flow = p*min(self.sending_flow[tuple(in_edges)[0]][t], min([self.receiving_flow[e][t]/(self.link_demands[e][t]/self.link_demands[tuple(in_edges)[0]][t]) for e in out_edges]))
                         except ZeroDivisionError:
                             transition_flow = 0
-                        self.N[edge][t+delta_t][0] = self.N[edge][t][0] + round(transition_flow)
+                        self.N[tuple(edge)][t+delta_t][0] = self.N[tuple(edge)][t][0] + round(transition_flow)
                         sum_transition_flow += transition_flow
                     self.N[tuple(in_edges)[0]][t+delta_t][1] = self.N[tuple(in_edges)[0]][t][1] + round(sum_transition_flow)
                 # If is merge node, update N(x, t) for outgoing edges
                 elif len(in_edges) > 1 and len(out_edges) == 1:
                     sum_transition_flow = 0
                     for edge in in_edges:
-                        if self.link_demands[tuple(out_edges)[0]][t] == 0:
-                            continue
+                        # if self.link_demands[tuple(out_edges)[0]][t] == 0:
+                        #     continue
                         # self.disaggregate_demand(edge, t)
-                        p=self.link_demands[edge][t]/self.link_demands[tuple(out_edges)[0]][t]
+                        
                         # Daganzo CTM model, lacks disaggregation of sending flow.
                         # transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]-(sum(self.sending_flow[k][t] for k in in_edges)-self.sending_flow[edge][t]), p*self.receiving_flow[tuple(out_edges)[0]][t]])[1]
                         # Jin and Zhang fairness model.
                         try:
+                            p=self.link_demands[edge][t]/self.link_demands[tuple(out_edges)[0]][t]
                             transition_flow = min(self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]*self.sending_flow[edge][t]/(sum([self.sending_flow[e][t] for e in in_edges])))
                         except ZeroDivisionError:
                             transition_flow = 0
                         self.N[edge][t+delta_t][1] = self.N[edge][t][1] + transition_flow
                         sum_transition_flow += transition_flow
                     self.N[tuple(out_edges)[0]][t+delta_t][0] = self.N[tuple(out_edges)[0]][t][0] + sum_transition_flow
+                # If is destination node, update N(x, t) for outgoing edges
+                elif len(in_edges) == 1 and len(out_edges) == 0:
+                    transition_flow = self.sending_flow[tuple(in_edges)[0]][t]
+                    self.N[tuple(in_edges)[0]][t+delta_t][1] = self.N[tuple(in_edges)[0]][t][1] + transition_flow
                 # If is normal node, update N(x, t) for outgoing edges
                 elif len(in_edges) > 1 and len(out_edges) > 1:
                     sum_inout = sum([self.node_transition_demand[node][i][j][t] for i in in_edges for j in out_edges])
@@ -200,6 +205,9 @@ class LTM:
         plt.ylabel("N(x, t)")
         plt.legend()
         plt.show()
+    
+    def get_link_travel_time(self, edge, t):
+        return 0
 
 
 
@@ -215,10 +223,10 @@ def create_sample_network():
 
     # G.add_edge("Or", "A", length=np.inf, q_max=np.inf, type='origin') # k_j, w are 0 now, but is debatable.
     G.add_edge("Or", "A", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type='origin')
-    G.add_edge("A", "B", length=0.4, q_max=20, k_j=1000, w=0.1, type='normal')
-    G.add_edge("B", "C", length=0.4, q_max=20, k_j=300, w=0.1, type='normal')
-    G.add_edge("C", "D", length=0.8, q_max=20, k_j=60, w=0.1, type='normal')
-    G.add_edge("C", "D", length=0.4, q_max=20, k_j=30, w=0.1, type='normal')
+    G.add_edge("A", "B", length=0.4, q_max=50, k_j=1000, w=0.1, type='normal')
+    G.add_edge("B", "C", length=0.4, q_max=50, k_j=300, w=0.1, type='normal')
+    G.add_edge("C", "D", length=0.8, q_max=50, k_j=60, w=0.1, type='normal')
+    G.add_edge("C", "D", length=0.4, q_max=50, k_j=30, w=0.1, type='normal')
     # G.add_edge("D", "De", length=np.inf, q_max=np.inf, type='destination') # Same as above
     G.add_edge("D", "De", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type='destination')
 
@@ -230,7 +238,7 @@ def generate_sample_demand(network, total_time, time_step=1):
     all_paths = list(nx.all_simple_edge_paths(network, source=origin, target=destination))
 
     # A very simple demand generation function, considering only one O-D pair, and 2 paths. Need to revise later for more complex situations.
-    path_demands = {path_id: [random.randint(0, 20) for _ in range(total_time // time_step)] for path_id, _ in enumerate(all_paths)}
+    path_demands = {path_id: [random.randint(0, 5) for _ in range(total_time // time_step)] for path_id, _ in enumerate(all_paths)}
     # Obtain link demands from path demands
     link_demands = {edge: {time: 0 for time in range(total_time // time_step)} for edge in network.edges(keys=True)}
     for path_id, demand_values in path_demands.items():
@@ -253,11 +261,11 @@ def generate_sample_demand(network, total_time, time_step=1):
 if __name__ == "__main__":
     network = create_sample_network()   
 
-    total_time = 60 
+    total_time = 600
     demand, paths = generate_sample_demand(network, total_time)
     # for edge in network.edges:
     #     print(tuple(edge))
     ltm = LTM(network, demand, paths, total_time)
     ltm.simulate()
-    ltm.plot_N(('C', 'D', 0))
+    ltm.plot_N(('C', 'D', 1))
     # print(ltm.N)
