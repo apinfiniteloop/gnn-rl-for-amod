@@ -85,27 +85,6 @@ class LTM:
                 return min(self.N[tuple(edge)][total_time-1][1]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max']*delta_t)
 
     def disaggregate_demand(self, t):
-        # # Disaggreagte O-D demand into edge demand
-        # # Need to revise later for considering multiple origins
-        # for edge in self.network.edges:
-        #     if edge['id'] == 1:
-        #         self.edge_demand[edge][t] = self.demand[t][1]
-        #     else:
-        #         self.edge_demand[edge][t] = self.demand[t][0]
-        # Update node transition demand, is dependent on path. Need to revise later for considering arbitrary paths
-        # for node in self.network.nodes:
-        #     if node == 'A':
-        #         self.node_transition_demand[node][('Or', 'A')][('A', 'B')][t] = self.path_demand[t][0]
-        #     elif node == 'B':
-        #         self.node_transition_demand[node][('A', 'B')][('B', 'C')][t] = self.path_demand[t][0]
-        #     elif node == 'C':
-        #         self.node_transition_demand[node][('B', 'C')][('C', 'D')][t] = self.path_demand[t][0]
-        #         self.node_transition_demand[node][('B', 'C')][('C', 'D')][t] = self.path_demand[t][1]
-        #     elif node == 'D':
-        #         self.node_transition_demand[node][('C', 'D')][('D', 'De')][t] = self.path_demand[t][0]
-        #         self.node_transition_demand[node][('C', 'D')][('D', 'De')][t] = self.path_demand[t][1]
-
-        # Update node transition demand, is dependent on path.
         return 0
 
     def simulate(self):
@@ -113,35 +92,16 @@ class LTM:
             if self.network.edges[edge]['type'] == 'origin':
                 self.N[edge][0][0] = self.link_demands[edge][0]
         for t in range(self.total_time-1):
-            # Put path demands into the upstream end of the outgoing edges from the source nodes.
-            # for path_id, path in enumerate(paths):
-            #     incoming_link = [edge for edge in self.network.in_edges(path[0][0], keys=True) if self.network.edges[edge]['type'] == 'origin'][0]
-            #     self.N[tuple(incoming_link)][t][0] += self.path_demands[t][path_id]
             for node in self.network.nodes:
                 # For each node, calculate the sending flow and receiving flow of its connected edges
-                for edge in set(self.network.out_edges(nbunch=node, keys=True)) | set(self.network.in_edges(nbunch=node, keys=True)):
-                    
-                    # if self.network.edges[edge]['type'] == 'origin':
-                    #     self.receiving_flow[tuple(edge)][t] = np.inf
-                    #     continue
-                    # if self.network.edges[edge]['type'] == 'destination':
-                    #     self.sending_flow[tuple(edge)][t] = np.inf
-                    #     continue
-
-                    # # Maybe correct? Don't know. Need further testing.
-                    # if self.network.edges[edge]['type'] == 'origin' or self.network.edges[edge]['type'] == 'destination':
-                    #     self.sending_flow[tuple(edge)][t] = np.inf
-                    #     self.receiving_flow[tuple(edge)][t] = np.inf
-                    #     continue
+                for edge in set(out_edges:=self.network.out_edges(nbunch=node, keys=True)) | set(in_edges:=self.network.in_edges(nbunch=node, keys=True)):
                     self.sending_flow[tuple(edge)][t] = self.calculate_sending_flow(edge, self.network.edges[edge], t)
                     self.receiving_flow[tuple(edge)][t] = self.calculate_receiving_flow(edge, self.network.edges[edge], t)
-                # Determine node's incoming and outgoing edges count
-                in_edges = self.network.in_edges(node, keys=True)
-                out_edges = self.network.out_edges(node, keys=True)
+                # # Determine node's incoming and outgoing edges count
+                # in_edges = self.network.in_edges(node, keys=True)
+                # out_edges = self.network.out_edges(node, keys=True)
                 # If is origin node, update N(x, t) for outgoing edges
                 if len(in_edges) == 0 and len(out_edges) == 1:
-                    # Need to revise later for considering multiple origins
-                    # transition_flow = min(sum([self.path_demands[i][t+delta_t] for i in self.path_demands.keys()])-self.N[tuple(out_edges)[0]][t][0], self.receiving_flow[tuple(out_edges)[0]][t])
                     transition_flow = min(sum([self.path_demands[i][t+delta_t] for i in self.path_demands.keys()]), self.receiving_flow[tuple(out_edges)[0]][t])
                     self.N[tuple(out_edges)[0]][t+delta_t][0] = self.N[tuple(out_edges)[0]][t][0] + transition_flow
                 # If is homogenous node, update N(x, t) for outgoing edges
