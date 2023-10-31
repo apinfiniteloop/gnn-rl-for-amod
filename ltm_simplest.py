@@ -1,13 +1,16 @@
 import networkx as nx
 import random
 import numpy as np
+import seaborn as sns
 from collections import defaultdict
 import matplotlib.pyplot as plt
 
-ffs = 0.2 # free flow speed
+ffs = 1 # free flow speed
 delta_t = 1 # time step
 # EPS = 1e-6 # epsilon for numerical stability
-
+sns.set()
+seed = 420
+random.seed(seed)
 
 # For storing dicts with edge as key
 class EdgeKeyDict(dict):
@@ -158,12 +161,17 @@ class LTM:
                             self.N[in_edge][t+delta_t][1] = self.N[in_edge][t][1] + transition_flow
     
     def plot_N(self, edge):
-        plt.scatter([t for t in range(self.total_time)], [self.N[edge][t][0] for t in range(self.total_time)], label='Upstream end')
-        plt.scatter([t for t in range(self.total_time)],[self.N[edge][t][1] for t in range(self.total_time)], label='Downstream end')
-        plt.title("N(x, t) for edge {}".format(edge))
-        plt.xlabel("Time")
-        plt.ylabel("N(x, t)")
+        plt.figure(figsize=(6, 5))
+        plt.plot([t for t in range(self.total_time)], [self.N[edge][t][0] for t in range(self.total_time)], marker='^', linestyle='--', label='Upstream end', markersize=4)
+        plt.plot([t for t in range(self.total_time)],[self.N[edge][t][1] for t in range(self.total_time)], marker='v', linestyle='--', label='Downstream end', markersize=4)
+        # plt.title("N(x, t) for edge {}".format(edge))
+        plt.xlabel("Time", fontsize=14)
+        plt.ylabel("N(x, t)", fontsize=14)
+        plt.xlim(0, 50)
+        plt.ylim(0, 250)
         plt.legend()
+        plt.tight_layout()
+        plt.savefig('cd1.pdf')
         plt.show()
     
     def get_link_travel_time(self, edge, t):
@@ -183,10 +191,10 @@ def create_sample_network():
 
     # G.add_edge("Or", "A", length=np.inf, q_max=np.inf, type='origin') # k_j, w are 0 now, but is debatable.
     G.add_edge("Or", "A", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type='origin')
-    G.add_edge("A", "B", length=0.4, q_max=50, k_j=1000, w=0.1, type='normal')
-    G.add_edge("B", "C", length=0.4, q_max=50, k_j=300, w=0.1, type='normal')
-    G.add_edge("C", "D", length=0.8, q_max=50, k_j=60, w=0.1, type='normal')
-    G.add_edge("C", "D", length=0.4, q_max=50, k_j=30, w=0.1, type='normal')
+    G.add_edge("A", "B", length=5, q_max=50, k_j=300, w=0.1, type='normal')
+    G.add_edge("B", "C", length=10, q_max=50, k_j=300, w=0.1, type='normal')
+    G.add_edge("C", "D", length=10, q_max=50, k_j=60, w=0.1, type='normal')
+    G.add_edge("C", "D", length=10, q_max=50, k_j=30, w=0.1, type='normal')
     # G.add_edge("D", "De", length=np.inf, q_max=np.inf, type='destination') # Same as above
     G.add_edge("D", "De", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type='destination')
 
@@ -221,7 +229,7 @@ def generate_sample_demand(network, total_time, time_step=1):
 if __name__ == "__main__":
     network = create_sample_network()   
 
-    total_time = 600
+    total_time = 200
     demand, paths = generate_sample_demand(network, total_time)
     # for edge in network.edges:
     #     print(tuple(edge))
