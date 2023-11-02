@@ -85,10 +85,7 @@ class LTM:
             try:
                 return min(self.N[tuple(edge)][t+delta_t+edge_attrib['length']/edge_attrib['w']][1]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max']*delta_t)
             except KeyError:
-                return min(self.N[tuple(edge)][total_time-1][1]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max']*delta_t)
-
-    def disaggregate_demand(self, t):
-        return 0
+                return min(self.N[tuple(edge)][self.total_time-1][1]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max']*delta_t)
 
     def simulate(self):
         for edge in self.network.edges(keys=True):
@@ -171,13 +168,13 @@ class LTM:
         plt.ylim(0, 250)
         plt.legend()
         plt.tight_layout()
-        plt.savefig('cd1.pdf')
+        plt.savefig('images/ltm_numerical_experiment/cd1.pdf')
         plt.show()
     
-    def get_link_travel_time(self, edge, t):
-        return 0
-
-
+    def get_link_mean_travel_time(self, edge):
+        inv_1 = np.interp(np.arange(self.N[edge][self.total_time-1][0]), [self.N[edge][t][0] for t in range(self.total_time)], np.arange(self.total_time))
+        inv_2 = np.interp(np.arange(self.N[edge][self.total_time-1][1]), [self.N[edge][t][1] for t in range(self.total_time)], np.arange(self.total_time))
+        return sum([inv_2[i]-inv_1[i] for i in range(len(inv_2))])/len(inv_2)
 
 def create_sample_network():
     G = nx.MultiDiGraph()
@@ -189,13 +186,11 @@ def create_sample_network():
     G.add_node("D")
     G.add_node("De")
 
-    # G.add_edge("Or", "A", length=np.inf, q_max=np.inf, type='origin') # k_j, w are 0 now, but is debatable.
     G.add_edge("Or", "A", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type='origin')
     G.add_edge("A", "B", length=5, q_max=50, k_j=300, w=0.1, type='normal')
     G.add_edge("B", "C", length=10, q_max=50, k_j=300, w=0.1, type='normal')
     G.add_edge("C", "D", length=10, q_max=50, k_j=60, w=0.1, type='normal')
     G.add_edge("C", "D", length=10, q_max=50, k_j=30, w=0.1, type='normal')
-    # G.add_edge("D", "De", length=np.inf, q_max=np.inf, type='destination') # Same as above
     G.add_edge("D", "De", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type='destination')
 
     return G
@@ -227,7 +222,7 @@ def generate_sample_demand(network, total_time, time_step=1):
     return (path_demands, link_demands), all_paths
 
 if __name__ == "__main__":
-    network = create_sample_network()   
+    network = create_sample_network()
 
     total_time = 200
     demand, paths = generate_sample_demand(network, total_time)
@@ -235,5 +230,7 @@ if __name__ == "__main__":
     #     print(tuple(edge))
     ltm = LTM(network, demand, paths, total_time)
     ltm.simulate()
-    ltm.plot_N(('C', 'D', 1))
+    time = ltm.get_link_mean_travel_time(('C', 'D', 1))
+    print(time)
+    # ltm.plot_N(('C', 'D', 1))
     # print(ltm.N)
