@@ -1,5 +1,11 @@
 import numpy as np
 
+class EdgeKeyDict(dict):
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = tuple(key)
+        return super().__getitem__(key)
+
 def mat2str(mat):
     return str(mat).replace("'",'"').replace('(','<').replace(')','>').replace('[','{').replace(']','}')  
 

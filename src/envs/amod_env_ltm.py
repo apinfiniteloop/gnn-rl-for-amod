@@ -4,16 +4,129 @@ import json
 import random
 from copy import deepcopy
 from collections import defaultdict
+from src.misc.utils import EdgeKeyDict
 import networkx as nx
 import numpy as np
 
+class AMoDEnv:
+    def __init__(self, scenario, beta=0.2) -> None:
+        self.scenario = deepcopy(scenario)
+        self.network = scenario.G
+        self.path_demands = scenario.path_demands
+        self.link_demands = scenario.link_demands
+        self.paths = scenario.all_paths
+        self.beta = beta
+        self.initial_travel_time = scenario.initial_travel_time
+        self.time = 0
+        self.total_time = scenario.total_time
+        self.time_step = scenario.time_step
+        self.N = defaultdict(EdgeKeyDict) # Cumulative Vehicle Number
+        self.N = { #Initialize N(x, t) for all edges
+            tuple(edge): {
+                t:{
+                    0: 0, # Upstream end
+                    1: 0  # Downstream end
+                } for t in range(self.total_time)
+            } for edge in self.network.edges
+        } # N(x, t)<->N[x][t][0/1]
+        self.sending_flow = defaultdict(EdgeKeyDict) # Sending Flow
+        self.sending_flow = { #Initialize sending flow for all edges
+            tuple(edge): {
+                t: 0 for t in range(self.total_time)
+            } for edge in self.network.edges
+        } # S_i(t) <-> sending_flow[i][t]
+        self.receiving_flow = defaultdict(EdgeKeyDict) # Receiving Flow
+        self.receiving_flow = { #Initialize receiving flow for all edges
+            tuple(edge): {
+                t: 0 for t in range(self.total_time)
+            } for edge in self.network.edges
+        } # R_i(t) <-> receiving_flow[i][t]
+        self.node_transition_demand = defaultdict(EdgeKeyDict) # Node Transition Demand, for storing demand of edge i to edge j, forall i in in_edges and j in out_edges
+        self.node_transition_demand = { #Initialize node transition demand for all nodes
+            node: {
+                i: {
+                    j: {
+                        t: 0 for t in range(self.total_time)
+                    } for j in self.network.out_edges(node, keys=True)
+                } for i in self.network.in_edges(node, keys=True)
+            } for node in self.network.nodes
+        }
+        # Calculate node transition demand based on path demand
+        for path_id, path in enumerate(self.paths):
+            for time in range(self.total_time):
+                for i in range(len(path)-1):
+                    self.node_transition_demand[path[i][1]][path[i]][path[i+1]][time] += self.path_demands[path_id][time]
+        for edge in self.network.edges(keys=True):
+            if self.network.edges[edge]['type'] == 'origin':
+                self.N[edge][0][0] = self.link_demands[edge][0]
+    
+    def ltm_step(self):
+        t = self.time
+        delta_t = self.time_step
+        for node in self.network.nodes:
+                # For each node, calculate the sending flow and receiving flow of its connected edges
+                for edge in set(out_edges:=self.network.out_edges(nbunch=node, keys=True)) | set(in_edges:=self.network.in_edges(nbunch=node, keys=True)):
+                    self.sending_flow[tuple(edge)][t] = self.calculate_sending_flow(edge, self.network.edges[edge], t)
+                    self.receiving_flow[tuple(edge)][t] = self.calculate_receiving_flow(edge, self.network.edges[edge], t)
+                # If is origin node, update N(x, t) for outgoing edges
+                if len(in_edges) == 0 and len(out_edges) == 1:
+                    transition_flow = min(sum([self.path_demands[i][t+delta_t] for i in self.path_demands.keys()]), self.receiving_flow[tuple(out_edges)[0]][t])
+                    self.N[tuple(out_edges)[0]][t+delta_t][0] = self.N[tuple(out_edges)[0]][t][0] + transition_flow
+                # If is homogenous node, update N(x, t) for outgoing edges
+                elif len(in_edges) == 1 and len(out_edges) == 1:
+                    transition_flow = min(self.sending_flow[tuple(in_edges)[0]][t], self.receiving_flow[tuple(out_edges)[0]][t])
+                    self.N[tuple(in_edges)[0]][t+delta_t][1] = self.N[tuple(in_edges)[0]][t][1] + transition_flow
+                    self.N[tuple(out_edges)[0]][t+delta_t][0] = self.N[tuple(out_edges)[0]][t][0] + transition_flow
+                # If is split node, update N(x, t) for outgoing edges
+                elif len(in_edges) == 1 and len(out_edges) > 1:
+                    sum_transition_flow = 0
+                    for edge in out_edges:
+                        try:
+                            p=self.link_demands[edge][t]/self.link_demands[tuple(in_edges)[0]][t]
+                            transition_flow = p*min(self.sending_flow[tuple(in_edges)[0]][t], min([self.receiving_flow[e][t]/(self.link_demands[e][t]/self.link_demands[tuple(in_edges)[0]][t]) for e in out_edges]))
+                        except ZeroDivisionError:
+                            transition_flow = 0
+                        self.N[tuple(edge)][t+delta_t][0] = self.N[tuple(edge)][t][0] + round(transition_flow)
+                        sum_transition_flow += transition_flow
+                    self.N[tuple(in_edges)[0]][t+delta_t][1] = self.N[tuple(in_edges)[0]][t][1] + round(sum_transition_flow)
+                # If is merge node, update N(x, t) for outgoing edges
+                elif len(in_edges) > 1 and len(out_edges) == 1:
+                    sum_transition_flow = 0
+                    for edge in in_edges:
+                        # if self.link_demands[tuple(out_edges)[0]][t] == 0:
+                        #     continue
+                        # self.disaggregate_demand(edge, t)
+                        # Daganzo CTM model, lacks disaggregation of sending flow.
+                        # transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]-(sum(self.sending_flow[k][t] for k in in_edges)-self.sending_flow[edge][t]), p*self.receiving_flow[tuple(out_edges)[0]][t]])[1]
+                        # Jin and Zhang fairness model.
+                        try:
+                            p=self.link_demands[edge][t]/self.link_demands[tuple(out_edges)[0]][t]
+                            transition_flow = min(self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]*self.sending_flow[edge][t]/(sum([self.sending_flow[e][t] for e in in_edges])))
+                        except ZeroDivisionError:
+                            transition_flow = 0
+                        self.N[edge][t+delta_t][1] = self.N[edge][t][1] + transition_flow
+                        sum_transition_flow += transition_flow
+                    self.N[tuple(out_edges)[0]][t+delta_t][0] = self.N[tuple(out_edges)[0]][t][0] + sum_transition_flow
+                # If is destination node, update N(x, t) for outgoing edges
+                elif len(in_edges) == 1 and len(out_edges) == 0:
+                    transition_flow = self.sending_flow[tuple(in_edges)[0]][t]
+                    self.N[tuple(in_edges)[0]][t+delta_t][1] = self.N[tuple(in_edges)[0]][t][1] + transition_flow
+                # If is normal node, update N(x, t) for outgoing edges
+                elif len(in_edges) > 1 and len(out_edges) > 1:
+                    sum_inout = sum([self.node_transition_demand[node][i][j][t] for i in in_edges for j in out_edges])
+                    for in_edge in in_edges:
+                        for out_edge in out_edges:
+                            p=self.node_transition_demand[node][in_edge][out_edge][t]/sum_inout
+                            transition_flow = p*min(min([self.receiving_flow[out_edge][t]*self.sending_flow[in_edge][t]/(sum([self.node_transition_demand[node][i][out_edge]*self.sending_flow[i][t] for i in in_edges]))]), self.sending_flow[in_edge][t])
+                            self.N[out_edge][t+delta_t][0] = self.N[out_edge][t][0] + transition_flow
+                            self.N[in_edge][t+delta_t][1] = self.N[in_edge][t][1] + transition_flow
 
 class Scenario:
     """
     Class for AMoD environment scenario. Loads network from json file or generates sample network.
     """
     def __init__(self, use_sample_network=True,
-    seed=None, total_time=60, json_file=None, json_hr=9, json_tstep=2, json_regions=None):
+    seed=None, total_time=60, time_step=1, json_file=None, json_hr=9, json_tstep=2, json_regions=None, ffs=0.2):
         """
         `Scenario` class for AMoD environment. Does all the network loading/generating from sample network/json file.
 
@@ -30,14 +143,24 @@ class Scenario:
         `json_hr`: int, hour of the day in json file
 
         `json_tstep`: int, time step in json file
+
+        `ffs`: float, free flow speed of network
         """
         self.seed = seed
         if seed is not None:
             np.random.seed(self.seed)
+            random.seed(self.seed)
         self.total_time = total_time
+        self.time_step = time_step
         if json_file == None or use_sample_network:
             self.is_json=False
-            self._load_sample_network()
+            self.G = self._load_sample_network()
+            (self.path_demands, self.link_demands), self.all_paths = self._generate_random_demand(self.G, "A", "D", self.total_time, 2)
+        else:
+            # If Using json file. TODO: Need a json file to complete.
+            raise NotImplementedError
+        self.initial_travel_time = {edge: self.G.edges[edge]['length'] / ffs for edge in self.G.edges(keys=True)}
+
     
 
     def _load_sample_network(self):
