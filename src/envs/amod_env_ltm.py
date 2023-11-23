@@ -5,35 +5,54 @@ import random
 from copy import deepcopy
 from itertools import product
 from collections import defaultdict
-from src.misc.utils import EdgeKeyDict
+from src.misc.utils import EdgeKeyDict, mat2str
 import networkx as nx
 import numpy as np
 
 
 class AMoDEnv:
+    """
+    Class for AMoD environment. Contains all the functions for the environment.
+    """
+
     def __init__(self, scenario, beta=0.2) -> None:
         self.scenario = deepcopy(scenario)
         self.network = scenario.G
+
+        # Demand related variables
+        self.paths = scenario.all_paths
         self.origins = scenario.origins
         self.destinations = scenario.destinations
-        self.pax_demand = scenario.pax_demand
+        self.pax_demand = (
+            scenario.pax_demand
+        )  # {(origin, destination): (demand, price)}
         self.path_demands = scenario.path_demands
         self.link_demands = scenario.link_demands
+        self.served_demand = defaultdict(dict)
+        for o, d in self.pax_demand.keys():
+            self.served_demand[o, d] = defaultdict(float)
+
+        # Vehicle count related variables
         self.acc = defaultdict(
             dict
         )  # number of vehicles within each region, key: i - region, t - time
         self.dacc = defaultdict(
             dict
         )  # number of vehicles arriving at each region, key: i - region, t - time
-        self.paths = scenario.all_paths
-        self.beta = beta
+        for node in self.network.nodes:
+            self.acc[node] = self.network.nodes[node]["accInit"]
+            self.dacc[node] = defaultdict(float)
+
+        # Time related variables
         self.initial_travel_time = scenario.initial_travel_time
         self.time = 0
         self.total_time = scenario.total_time
         self.time_step = scenario.time_step
-        self.N = defaultdict(EdgeKeyDict)  # Cumulative Vehicle Number
+
+        # LTM related variables
+        self.cvn = defaultdict(EdgeKeyDict)  # Cumulative Vehicle Number
         self.ffs = scenario.ffs
-        self.N = {  # Initialize N(x, t) for all edges
+        self.cvn = {  # Initialize N(x, t) for all edges
             tuple(edge): {
                 t: {0: 0, 1: 0}  # Upstream end  # Downstream end
                 for t in range(self.total_time)
@@ -65,16 +84,34 @@ class AMoDEnv:
                 for node in self.network.nodes
             }
         )
+        self.link_mean_travel_time = defaultdict(EdgeKeyDict)
+        self.link_mean_travel_time = {
+            tuple(edge): {t: 0 for t in range(self.total_time)}
+            for edge in self.network.edges
+        }
+        self.link_traffic_flow = defaultdict(EdgeKeyDict)
+        self.link_traffic_flow = {
+            tuple(edge): {t: 0 for t in range(self.total_time)}
+            for edge in self.network.edges
+        }
+
         # Calculate node transition demand based on path demand
-        for path_id, path in enumerate(self.paths):
-            for time in range(self.total_time):
-                for i in range(len(path) - 1):
-                    self.node_transition_demand[path[i][1]][path[i]][path[i + 1]][
-                        time
-                    ] += self.path_demands[path_id][time]
-        for edge in self.network.edges(keys=True):
-            if self.network.edges[edge]["type"] == "origin":
-                self.N[edge][0][0] = self.link_demands[edge][0]
+        # for path_id, path in enumerate(self.paths):
+        #     for time in range(self.total_time):
+        #         for i in range(len(path) - 1):
+        #             self.node_transition_demand[path[i][1]][path[i]][path[i + 1]][
+        #                 time
+        #             ] += self.path_demands[path_id][time]
+        # for edge in self.network.edges(keys=True):
+        #     if self.network.edges[edge]["type"] == "origin":
+        #         self.cvn[edge][0][0] = self.link_demands[edge][0]
+
+        # Misc variables
+        self.beta = beta * scenario.time_step
+        self.info = dict.fromkeys(
+            ["revenue", "served_demand", "rebalancing_cost", "operating_cost"], 0
+        )
+        self.reward = 0
 
     def calculate_sending_flow(self, edge, edge_attrib, t):
         delta_t = self.time_step
@@ -82,12 +119,12 @@ class AMoDEnv:
         # Source nodes and destination nodes don't have 'w' and 'k_j' attribute.
         if t + delta_t - edge_attrib["length"] / ffs < 0:
             return min(
-                self.N[tuple(edge)][0][0] - self.N[tuple(edge)][t][1],
+                self.cvn[tuple(edge)][0][0] - self.cvn[tuple(edge)][t][1],
                 edge_attrib["q_max"],
             )
         return min(
-            self.N[tuple(edge)][t + delta_t - edge_attrib["length"] / ffs][0]
-            - self.N[tuple(edge)][t][1],
+            self.cvn[tuple(edge)][t + delta_t - edge_attrib["length"] / ffs][0]
+            - self.cvn[tuple(edge)][t][1],
             edge_attrib["q_max"] * delta_t,
         )
 
@@ -97,18 +134,18 @@ class AMoDEnv:
             return np.inf
         try:
             return min(
-                self.N[tuple(edge)][
+                self.cvn[tuple(edge)][
                     t + delta_t + edge_attrib["length"] / edge_attrib["w"]
                 ][1]
                 + edge_attrib["k_j"] * edge_attrib["length"]
-                - self.N[tuple(edge)][t][0],
+                - self.cvn[tuple(edge)][t][0],
                 edge_attrib["q_max"] * delta_t,
             )
         except KeyError:
             return min(
-                self.N[tuple(edge)][self.total_time - 1][1]
+                self.cvn[tuple(edge)][self.total_time - 1][1]
                 + edge_attrib["k_j"] * edge_attrib["length"]
-                - self.N[tuple(edge)][t][0],
+                - self.cvn[tuple(edge)][t][0],
                 edge_attrib["q_max"] * delta_t,
             )
 
@@ -124,13 +161,34 @@ class AMoDEnv:
         `PATH`: str, path to store CPLEX output
         """
         t = self.time
-        demandAttr = [
+        demand_attr = [
             (i, j, self.pax_demand[t][(i, j)][0], self.pax_demand[t][(i, j)][1])
             for i, j in product(self.origins, self.destinations)
-            if t in self.pax_demand.keys() and (i, j) in self.pax_demand[t].keys()
+            if t in self.pax_demand.keys()
+            and (i, j) in self.pax_demand[t].keys()
+            and self.pax_demand[t][(i, j)][0] > 1e-6
         ]  # Demand attributes, (origin, destination, demand, price)
+        acc_tuple = [
+            (i, self.acc[i][t + 1]) for i in self.acc
+        ]  # Accumulation attributes
+        mod_path = os.getcwd().replace("\\", "/") + "/src/cplex_mod/"
+        matching_path = (
+            os.getcwd().replace("\\", "/")
+            + "/saved_files/cplex_logs/matching/"
+            + PATH
+            + "/"
+        )
+        if not os.path.exists(matching_path):
+            os.makedirs(matching_path)
+        data_file = matching_path + "data_{}.dat".format(t)
+        res_file = matching_path + "res_{}.dat".format(t)
+        with open(data_file, "w", encoding="UTF-8") as f:
+            f.write('path="' + res_file + '";\r\n')
+            f.write("demandAttr=" + mat2str(demand_attr) + ";\r\n")
+            f.write("accInitTuple=" + mat2str(acc_tuple) + ";\r\n")
+        mod_file = mod_path + "matching.mod"
 
-    def ltm_step(self):
+    def ltm_step(self, use_ctm_at_merge=False):
         t = self.time
         delta_t = self.time_step
         for node in self.network.nodes:
@@ -155,8 +213,8 @@ class AMoDEnv:
                     ),
                     self.receiving_flow[tuple(out_edges)[0]][t],
                 )
-                self.N[tuple(out_edges)[0]][t + delta_t][0] = (
-                    self.N[tuple(out_edges)[0]][t][0] + transition_flow
+                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = (
+                    self.cvn[tuple(out_edges)[0]][t][0] + transition_flow
                 )
             # If is homogenous node, update N(x, t) for outgoing edges
             elif len(in_edges) == 1 and len(out_edges) == 1:
@@ -164,11 +222,11 @@ class AMoDEnv:
                     self.sending_flow[tuple(in_edges)[0]][t],
                     self.receiving_flow[tuple(out_edges)[0]][t],
                 )
-                self.N[tuple(in_edges)[0]][t + delta_t][1] = (
-                    self.N[tuple(in_edges)[0]][t][1] + transition_flow
+                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = (
+                    self.cvn[tuple(in_edges)[0]][t][1] + transition_flow
                 )
-                self.N[tuple(out_edges)[0]][t + delta_t][0] = (
-                    self.N[tuple(out_edges)[0]][t][0] + transition_flow
+                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = (
+                    self.cvn[tuple(out_edges)[0]][t][0] + transition_flow
                 )
             # If is split node, update N(x, t) for outgoing edges
             elif len(in_edges) == 1 and len(out_edges) > 1:
@@ -194,13 +252,13 @@ class AMoDEnv:
                         )
                     except ZeroDivisionError:
                         transition_flow = 0
-                    self.N[tuple(edge)][t + delta_t][0] = self.N[tuple(edge)][t][
+                    self.cvn[tuple(edge)][t + delta_t][0] = self.cvn[tuple(edge)][t][
                         0
                     ] + round(transition_flow)
                     sum_transition_flow += transition_flow
-                self.N[tuple(in_edges)[0]][t + delta_t][1] = self.N[tuple(in_edges)[0]][
-                    t
-                ][1] + round(sum_transition_flow)
+                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = self.cvn[
+                    tuple(in_edges)[0]
+                ][t][1] + round(sum_transition_flow)
             # If is merge node, update N(x, t) for outgoing edges
             elif len(in_edges) > 1 and len(out_edges) == 1:
                 sum_transition_flow = 0
@@ -209,31 +267,44 @@ class AMoDEnv:
                     #     continue
                     # self.disaggregate_demand(edge, t)
                     # Daganzo CTM model, lacks disaggregation of sending flow.
-                    # transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t]-(sum(self.sending_flow[k][t] for k in in_edges)-self.sending_flow[edge][t]), p*self.receiving_flow[tuple(out_edges)[0]][t]])[1]
-                    # Jin and Zhang fairness model.
-                    try:
-                        p = (
-                            self.link_demands[edge][t]
-                            / self.link_demands[tuple(out_edges)[0]][t]
+                    if use_ctm_at_merge:
+                        transition_flow = sorted(
+                            [
+                                self.sending_flow[edge][t],
+                                self.receiving_flow[tuple(out_edges)[0]][t]
+                                - (
+                                    sum(self.sending_flow[k][t] for k in in_edges)
+                                    - self.sending_flow[edge][t]
+                                ),
+                                p * self.receiving_flow[tuple(out_edges)[0]][t],
+                            ]
+                        )[1]
+                    else:
+                        try:
+                            p = (
+                                self.link_demands[edge][t]
+                                / self.link_demands[tuple(out_edges)[0]][t]
+                            )
+                            transition_flow = min(
+                                self.sending_flow[edge][t],
+                                self.receiving_flow[tuple(out_edges)[0]][t]
+                                * self.sending_flow[edge][t]
+                                / (sum([self.sending_flow[e][t] for e in in_edges])),
+                            )
+                        except ZeroDivisionError:
+                            transition_flow = 0
+                        self.cvn[edge][t + delta_t][1] = (
+                            self.cvn[edge][t][1] + transition_flow
                         )
-                        transition_flow = min(
-                            self.sending_flow[edge][t],
-                            self.receiving_flow[tuple(out_edges)[0]][t]
-                            * self.sending_flow[edge][t]
-                            / (sum([self.sending_flow[e][t] for e in in_edges])),
-                        )
-                    except ZeroDivisionError:
-                        transition_flow = 0
-                    self.N[edge][t + delta_t][1] = self.N[edge][t][1] + transition_flow
-                    sum_transition_flow += transition_flow
-                self.N[tuple(out_edges)[0]][t + delta_t][0] = (
-                    self.N[tuple(out_edges)[0]][t][0] + sum_transition_flow
+                        sum_transition_flow += transition_flow
+                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = (
+                    self.cvn[tuple(out_edges)[0]][t][0] + sum_transition_flow
                 )
             # If is destination node, update N(x, t) for outgoing edges
             elif len(in_edges) == 1 and len(out_edges) == 0:
                 transition_flow = self.sending_flow[tuple(in_edges)[0]][t]
-                self.N[tuple(in_edges)[0]][t + delta_t][1] = (
-                    self.N[tuple(in_edges)[0]][t][1] + transition_flow
+                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = (
+                    self.cvn[tuple(in_edges)[0]][t][1] + transition_flow
                 )
             # If is normal node, update N(x, t) for outgoing edges
             elif len(in_edges) > 1 and len(out_edges) > 1:
@@ -270,11 +341,11 @@ class AMoDEnv:
                             ),
                             self.sending_flow[in_edge][t],
                         )
-                        self.N[out_edge][t + delta_t][0] = (
-                            self.N[out_edge][t][0] + transition_flow
+                        self.cvn[out_edge][t + delta_t][0] = (
+                            self.cvn[out_edge][t][0] + transition_flow
                         )
-                        self.N[in_edge][t + delta_t][1] = (
-                            self.N[in_edge][t][1] + transition_flow
+                        self.cvn[in_edge][t + delta_t][1] = (
+                            self.cvn[in_edge][t][1] + transition_flow
                         )
         self.time += delta_t
 
@@ -347,12 +418,12 @@ class Scenario:
         """
         G = nx.MultiDiGraph()
 
-        G.add_node("Or")
+        # G.add_node("Or")
         G.add_node("A")
         G.add_node("B")
         G.add_node("C")
         G.add_node("D")
-        G.add_node("De")
+        # G.add_node("De")
 
         # G.add_edge("Or", "A", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type="origin")
         G.add_edge("A", "B", length=5, q_max=50, k_j=300, w=0.1, type="normal")
@@ -376,6 +447,7 @@ class Scenario:
         dummy_w=1e-6,
     ):
         for o in origins:
+            network.add_node(o + "*")
             network.add_edge(
                 o + "*",
                 o,
@@ -386,6 +458,7 @@ class Scenario:
                 type="origin",
             )
         for d in destinations:
+            network.add_node(d + "*")
             network.add_edge(
                 d,
                 d + "*",
@@ -422,6 +495,10 @@ class Scenario:
             }
             for time_step in range(self.total_time)
         }
+
+    def _generate_original_acc(self, network, acc_scale: tuple = (0, 5)):
+        for node in network.nodes:
+            node["accInit"] = random.randint(acc_scale[0], acc_scale[1])
 
         # if not self.is_json:
         #     self.origins.append("A")
