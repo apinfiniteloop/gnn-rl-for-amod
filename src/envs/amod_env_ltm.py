@@ -21,6 +21,7 @@ class AMoDEnv:
         self.total_time = scenario.total_time
         self.time_step = scenario.time_step
         self.N = defaultdict(EdgeKeyDict) # Cumulative Vehicle Number
+        self.ffs = scenario.ffs
         self.N = { #Initialize N(x, t) for all edges
             tuple(edge): {
                 t:{
@@ -60,6 +61,23 @@ class AMoDEnv:
             if self.network.edges[edge]['type'] == 'origin':
                 self.N[edge][0][0] = self.link_demands[edge][0]
     
+    def calculate_sending_flow(self, edge, edge_attrib, t):
+        delta_t = self.time_step
+        ffs = self.ffs
+        # Source nodes and destination nodes don't have 'w' and 'k_j' attribute.
+        if t+delta_t-edge_attrib['length']/ffs < 0:
+            return min(self.N[tuple(edge)][0][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max'])
+        return min(self.N[tuple(edge)][t+delta_t-edge_attrib['length']/ffs][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max']*delta_t)
+
+    def calculate_receiving_flow(self, edge, edge_attrib, t):
+        delta_t = self.time_step
+        if edge_attrib['type'] == 'destination':
+            return np.inf
+        try:
+            return min(self.N[tuple(edge)][t+delta_t+edge_attrib['length']/edge_attrib['w']][1]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max']*delta_t)
+        except KeyError:
+            return min(self.N[tuple(edge)][self.total_time-1][1]+edge_attrib['k_j']*edge_attrib['length']-self.N[tuple(edge)][t][0], edge_attrib['q_max']*delta_t)
+
     def ltm_step(self):
         t = self.time
         delta_t = self.time_step
@@ -120,6 +138,7 @@ class AMoDEnv:
                             transition_flow = p*min(min([self.receiving_flow[out_edge][t]*self.sending_flow[in_edge][t]/(sum([self.node_transition_demand[node][i][out_edge]*self.sending_flow[i][t] for i in in_edges]))]), self.sending_flow[in_edge][t])
                             self.N[out_edge][t+delta_t][0] = self.N[out_edge][t][0] + transition_flow
                             self.N[in_edge][t+delta_t][1] = self.N[in_edge][t][1] + transition_flow
+        self.time += delta_t
 
 class Scenario:
     """
@@ -160,6 +179,7 @@ class Scenario:
             # If Using json file. TODO: Need a json file to complete.
             raise NotImplementedError
         self.initial_travel_time = {edge: self.G.edges[edge]['length'] / ffs for edge in self.G.edges(keys=True)}
+        self.ffs = ffs
 
     
 

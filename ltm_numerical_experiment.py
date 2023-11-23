@@ -68,8 +68,7 @@ class LTM:
         # Source nodes and destination nodes don't have 'w' and 'k_j' attribute.
         if t+delta_t-edge_attrib['length']/ffs < 0:
             return min(self.N[tuple(edge)][0][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max'])
-        else:
-            return min(self.N[tuple(edge)][t+delta_t-edge_attrib['length']/ffs][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max']*delta_t)
+        return min(self.N[tuple(edge)][t+delta_t-edge_attrib['length']/ffs][0]-self.N[tuple(edge)][t][1], edge_attrib['q_max']*delta_t)
 
     def calculate_receiving_flow(self, edge, edge_attrib, t):
         if edge_attrib['type'] == 'destination':

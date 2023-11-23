@@ -156,7 +156,7 @@ class AMoD:
     # reb step
     def reb_step(self, rebAction):
         t = self.time
-        self.reward = 0 # reward is calculated from before this to the next rebalancing, we may also have two rewards, one for pax matching and one for rebalancing
+        self.reward = 0 # reward is calculated fr om before this to the next rebalancing, we may also have two rewards, one for pax matching and one for rebalancing
         self.rebAction = rebAction      
         # rebalancing
         for k in range(len(self.edges)):
