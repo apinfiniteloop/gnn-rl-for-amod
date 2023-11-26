@@ -19,6 +19,12 @@ class AMoDEnv:
         self.scenario = deepcopy(scenario)
         self.network = scenario.G
 
+        # Time related variables
+        self.initial_travel_time = scenario.initial_travel_time
+        self.time = 0
+        self.total_time = scenario.total_time
+        self.time_step = scenario.time_step
+
         # Demand related variables
         self.paths = scenario.all_paths
         self.origins = scenario.origins
@@ -39,15 +45,16 @@ class AMoDEnv:
         self.dacc = defaultdict(
             dict
         )  # number of vehicles arriving at each region, key: i - region, t - time
+        self.sch = {
+            t: {
+                i: {(o, d): None for o, d in product(self.network.nodes)}
+                for i in self.network.nodes
+            }
+            for t in range(self.total_time)
+        }  # Vehicle schedule. sch[t][i][(o,d)] <-> At time t, the amount of vehicles at node i, about to go from o to d.
         for node in self.network.nodes:
             self.acc[node] = self.network.nodes[node]["accInit"]
             self.dacc[node] = defaultdict(float)
-
-        # Time related variables
-        self.initial_travel_time = scenario.initial_travel_time
-        self.time = 0
-        self.total_time = scenario.total_time
-        self.time_step = scenario.time_step
 
         # LTM related variables
         self.cvn = defaultdict(EdgeKeyDict)  # Cumulative Vehicle Number
@@ -149,7 +156,7 @@ class AMoDEnv:
                 edge_attrib["q_max"] * delta_t,
             )
 
-    def matching(self, CPLEXPATH=None, PATH=""):
+    def matching(self, CPLEXPATH=None, PATH="", platform="win"):
         """
 
         Matching function for AMoD environment. Uses CPLEX to solve the optimization problem.
@@ -187,6 +194,20 @@ class AMoDEnv:
             f.write("demandAttr=" + mat2str(demand_attr) + ";\r\n")
             f.write("accInitTuple=" + mat2str(acc_tuple) + ";\r\n")
         mod_file = mod_path + "matching.mod"
+        if CPLEXPATH is None:
+            CPLEXPATH = "C:/Program Files/ibm/ILOG/CPLEX_Studio1210/opl/bin/x64_win64/"
+        my_env = os.environ.copy()
+        if platform == "mac":
+            my_env["DYLD_LIBRARY_PATH"] = CPLEXPATH
+        else:
+            my_env["LD_LIBRARY_PATH"] = CPLEXPATH
+        out_file = matching_path + "out_{}.dat".format(t)
+        with open(out_file, "w") as output_f:
+            subprocess.check_call(
+                [CPLEXPATH + "oplrun", mod_file, data_file], stdout=output_f, env=my_env
+            )
+        output_f.close()
+        flow = defaultdict(float)
 
     def ltm_step(self, use_ctm_at_merge=False):
         t = self.time
