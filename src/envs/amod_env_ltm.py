@@ -18,6 +18,9 @@ class AMoDEnv:
     def __init__(self, scenario, beta=0.2) -> None:
         self.scenario = deepcopy(scenario)
         self.network = scenario.G
+        self.gen_cost = defaultdict(
+            EdgeKeyDict
+        )  # Generalized cost, for every edge and time. gen_cost[i][t] <-> generalized cost of edge i at time t
 
         # Time related variables
         self.initial_travel_time = scenario.initial_travel_time
@@ -41,10 +44,10 @@ class AMoDEnv:
         # Vehicle count related variables
         self.acc = defaultdict(
             dict
-        )  # number of vehicles within each region, key: i - region, t - time
+        )  # number of vehicles within each node, acc[t][i] <-> number of vehicles at node i at time t
         self.dacc = defaultdict(
             dict
-        )  # number of vehicles arriving at each region, key: i - region, t - time
+        )  # number of vehicles arriving at each node, dacc[t][i] <-> number of vehicles arriving at node i at time t
         self.sch = {
             t: {
                 i: {(o, d): None for o, d in product(self.network.nodes)}
@@ -53,8 +56,8 @@ class AMoDEnv:
             for t in range(self.total_time)
         }  # Vehicle schedule. sch[t][i][(o,d)] <-> At time t, the amount of vehicles at node i, about to go from o to d.
         for node in self.network.nodes:
-            self.acc[node] = self.network.nodes[node]["accInit"]
-            self.dacc[node] = defaultdict(float)
+            self.acc[0][node] = self.network.nodes[node]["accInit"]
+            self.dacc[0][node] = defaultdict(float)
 
         # LTM related variables
         self.cvn = defaultdict(EdgeKeyDict)  # Cumulative Vehicle Number
@@ -178,6 +181,31 @@ class AMoDEnv:
         acc_tuple = [
             (i, self.acc[i][t + 1]) for i in self.acc
         ]  # Accumulation attributes
+        io_path_tuple = [
+            (
+                (i, j),
+                [
+                    (path, sum(self.gen_cost[edge][t] for edge in path))
+                    for path in nx.all_simple_edge_paths(
+                        self.network, source=i, target=j
+                    )
+                ],
+            )
+            for i, j in product(self.acc[t].keys(), self.origins[t])
+        ]  # All possible paths from vehicle location to trip origin, with their generalized cost
+        od_path_tuple = [
+            (
+                (i, j),
+                [
+                    (path, sum(self.gen_cost[edge][t] for edge in path))
+                    for path in nx.all_simple_edge_paths(
+                        self.network, source=i, target=j
+                    )
+                ],
+            )
+            for i, j in product(self.origins[t], self.destinations[t])
+        ]  # All possible paths from trip origin to trip destination, with their generalized cost
+
         mod_path = os.getcwd().replace("\\", "/") + "/src/cplex_mod/"
         matching_path = (
             os.getcwd().replace("\\", "/")
@@ -193,6 +221,9 @@ class AMoDEnv:
             f.write('path="' + res_file + '";\r\n')
             f.write("demandAttr=" + mat2str(demand_attr) + ";\r\n")
             f.write("accInitTuple=" + mat2str(acc_tuple) + ";\r\n")
+            # May be not accepted by CPLEX. TODO: Subject to change
+            f.write("ioPathTuple=" + mat2str(io_path_tuple) + ";\r\n")
+            f.write("odPathTuple=" + mat2str(od_path_tuple) + ";\r\n")
         mod_file = mod_path + "matching.mod"
         if CPLEXPATH is None:
             CPLEXPATH = "C:/Program Files/ibm/ILOG/CPLEX_Studio1210/opl/bin/x64_win64/"
@@ -430,8 +461,8 @@ class Scenario:
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
         self.ffs = ffs
-        self.origins = []
-        self.destinations = []
+        self.origins = {}  # {time: [origins]}
+        self.destinations = {}  # {time: [destinations]}
 
     def _load_sample_network(self):
         """
