@@ -104,18 +104,6 @@ class AMoDEnv:
             tuple(edge): {t: 0 for t in range(self.total_time)}
             for edge in self.network.edges
         }
-
-        # Calculate node transition demand based on path demand
-        # for path_id, path in enumerate(self.paths):
-        #     for time in range(self.total_time):
-        #         for i in range(len(path) - 1):
-        #             self.node_transition_demand[path[i][1]][path[i]][path[i + 1]][
-        #                 time
-        #             ] += self.path_demands[path_id][time]
-        # for edge in self.network.edges(keys=True):
-        #     if self.network.edges[edge]["type"] == "origin":
-        #         self.cvn[edge][0][0] = self.link_demands[edge][0]
-
         # Misc variables
         self.beta = beta * scenario.time_step
         self.info = dict.fromkeys(
@@ -188,6 +176,19 @@ class AMoDEnv:
             for path, cost in paths:
                 io_path_tuple.append(((i, j), (path_id, cost)))
                 path_id += 1
+        
+        # Generate OD paths with unique IDs
+        for i, j in product(origins, destinations):
+            paths = [
+                ([edge for edge in nx.all_simple_edge_paths(network, source=i, target=j)], 
+                sum(gen_cost[edge][time_period] for edge in path))
+                for path in nx.all_simple_edge_paths(network, source=i, target=j)
+            ]
+            for path, cost in paths:
+                od_path_tuple.append(((i, j), (path_id, cost)))
+                path_id += 1
+
+        return io_path_tuple, od_path_tuple
     
     def format_for_opl(self, value):
         """Format Python data types into strings that OPL can parse."""
@@ -226,30 +227,6 @@ class AMoDEnv:
         io_path_tuple, od_path_tuple = self.generate_path_ids(
             self.network, t, self.gen_cost, self.acc, self.origins, self.destinations
         )
-        # io_path_tuple = [
-        #     (
-        #         (i, j),
-        #         [
-        #             (path, sum(self.gen_cost[edge][t] for edge in path))
-        #             for path in nx.all_simple_edge_paths(
-        #                 self.network, source=i, target=j
-        #             )
-        #         ]
-        #     )
-        #     for i, j in product(self.acc[t].keys(), self.origins[t])
-        # ]  # All possible paths from vehicle location to trip origin, with their generalized cost. io_path_tuple[id][0] is the pair of (i, o), io_path_tuple[id][1] is the list of (path, cost) from i to o
-        # od_path_tuple = [
-        #     (
-        #         (i, j),
-        #         [
-        #             (path, sum(self.gen_cost[edge][t] for edge in path))
-        #             for path in nx.all_simple_edge_paths(
-        #                 self.network, source=i, target=j
-        #             )
-        #         ],
-        #     )
-        #     for i, j in product(self.origins[t], self.destinations[t])
-        # ]  # All possible paths from trip origin to trip destination, with their generalized cost
 
         mod_path = os.getcwd().replace("\\", "/") + "/src/cplex_mod/"
         matching_path = (
@@ -300,14 +277,17 @@ class AMoDEnv:
         io_flow = defaultdict(float)
         # Retrieve and process the result file. TODO: Write it.
 
-        pax_action = 
+        # pick_action: Retreived from OPL and formulated to be used in pax_step and LTM. pick_action[(i, j)][path_id] = flow
+        # pax_action: Retreived from OPL and formulated to be used in pax_step and LTM. pax_action[(i, j)][path_id] = flow
+        return pick_action, pax_action
 
-    def ltm_step(self, use_ctm_at_merge=False, pax_action=None, reb_action=None, CPLEXPATH=None, PATH="", platform="win"):
+    def ltm_step(self, use_ctm_at_merge=False, pick_action=None, pax_action=None, reb_action=None, CPLEXPATH=None, PATH="", platform="win"):
         """
         Perform a step in the LTM simulation.
 
         Args:
             `use_ctm_at_merge` (bool, optional): Flag indicating whether to use the Daganzo CTM model at merge nodes. Defaults to False.
+            `pick_action` (None, optional): Not used in this method. Defaults to None.
             `pax_action` (None, optional): Not used in this method. Defaults to None.
             `reb_action` (None, optional): Not used in this method. Defaults to None.
             `CPLEXPATH` (None, optional): Not used in this method. Defaults to None.
@@ -326,7 +306,7 @@ class AMoDEnv:
         if (
             paxAction is None
         ):  # default matching algorithm used if isMatching is True, matching method will need the information of self.acc[t+1], therefore this part cannot be put forward
-            paxAction = self.matching(CPLEXPATH=CPLEXPATH, PATH=PATH, platform=platform)
+            pickAction, paxAction = self.matching(CPLEXPATH=CPLEXPATH, PATH=PATH, platform=platform)
         self.paxAction = paxAction
         # Passenger serving
         for edge in self.network.edges(keys=True,data=False):
