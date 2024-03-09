@@ -147,48 +147,46 @@ class AMoDEnv:
                 edge_attrib["q_max"] * delta_t,
             )
         
-    def generate_path_ids(self, network, time_period, gen_cost, acc, origins, destinations):
+    def generate_path_ids(self, network, pax_demand, time, gen_cost, acc, origins, destinations):
         """
-        Generate unique path IDs and their costs for IO and OD paths.
-        
+        Generate unique path IDs and their costs for IOD paths.
+
         Args:
         - network: A NetworkX graph representing the network.
         - time_period: The current time period for cost calculation.
         - gen_cost: A dictionary holding the generalized cost of edges.
         - acc: A dictionary holding vehicle accumulations.
         - origins, destinations: Lists of origin and destination node IDs.
-        
+        - intermediates: List of intermediate node IDs that each path must pass through.
+
         Returns:
-        - io_path_tuple: A list of tuples for IO paths with path IDs and costs.
-        - od_path_tuple: A list of tuples for OD paths with path IDs and costs.
+        - iod_path_tuple: A list of tuples for IOD paths with path IDs and costs.
+        - iod_path_dict: A dictionary of dictionaries for IOD paths with path IDs and costs.
         """
-        path_id = 0
-        io_path_tuple = []
-        od_path_tuple = []
-
-        # Generate IO paths with unique IDs
-        for i, j in product(acc.keys(), origins):
-            paths = [
-                ([edge for edge in nx.all_simple_edge_paths(network, source=i, target=j)], 
-                sum(gen_cost[edge][time_period] for edge in path))
-                for path in nx.all_simple_edge_paths(network, source=i, target=j)
-            ]
-            for path, cost in paths:
-                io_path_tuple.append(((i, j), (path_id, cost)))
-                path_id += 1
         
-        # Generate OD paths with unique IDs
-        for i, j in product(origins, destinations):
-            paths = [
-                ([edge for edge in nx.all_simple_edge_paths(network, source=i, target=j)], 
-                sum(gen_cost[edge][time_period] for edge in path))
-                for path in nx.all_simple_edge_paths(network, source=i, target=j)
-            ]
-            for path, cost in paths:
-                od_path_tuple.append(((i, j), (path_id, cost)))
-                path_id += 1
+        path_id = 0
+        iod_path_tuple = []
+        iod_path_dict = {} # iod_path_dict[(i,o,d)][path_id] = (path, cost)
 
-        return io_path_tuple, od_path_tuple
+        # Generate IOD paths with unique IDs
+        for i, o, d in product(self.acc.keys(), origins, destinations):
+            io_paths = nx.all_simple_paths(network, source=i, target=o)
+            od_paths = nx.all_simple_paths(network, source=o, target=d)
+
+            for io_path in io_paths:
+                for od_path in od_paths:
+                    # Combine IO and OD paths, excluding the duplicate occurrence of 'o'
+                    combined_path = io_path + od_path[1:]
+                    # Calculate the total cost of the combined path
+                    total_cost = sum(gen_cost[edge][time] for edge in zip(combined_path[:-1], combined_path[1:]))
+                    # Update tuples and dictionaries with the new path and its cost
+                    iod_path_tuple.append((i, o, d, path_id, total_cost, self.pax_demand[time][(o, d)][0], self.pax_demand[time][(o, d)][1]) if time in self.pax_demand and (o, d) in self.pax_demand[time] else (i, o, d, path_id, total_cost, 0, 0))
+                    if (i, o, d) not in iod_path_dict:
+                        iod_path_dict[(i, o, d)] = {}
+                    iod_path_dict[(i, o, d)][path_id] = (combined_path, total_cost)
+                    path_id += 1
+
+        return iod_path_tuple, iod_path_dict
     
     def format_for_opl(self, value):
         """Format Python data types into strings that OPL can parse."""
@@ -224,7 +222,7 @@ class AMoDEnv:
         acc_tuple = [
             (i, self.acc[i][t + 1]) for i in self.acc
         ]  # Accumulation attributes
-        io_path_tuple, od_path_tuple = self.generate_path_ids(
+        iod_path_tuple, iod_path_dict = self.generate_path_ids(
             self.network, t, self.gen_cost, self.acc, self.origins, self.destinations
         )
 
@@ -244,22 +242,8 @@ class AMoDEnv:
             f.write(f"demandAttr = {self.format_for_opl(demand_attr)};\n")
             # Writing accInitTuple
             f.write(f"accInitTuple = {self.format_for_opl(acc_tuple)};\n")
-            
-            # Preparing ioPathTuple and odPathTuple for OPL
-            io_dict = defaultdict(list)
-            for (i, o), paths in io_path_tuple:
-                for path_id, cost in paths:
-                    io_dict[(i, o)].append((path_id, cost))
-                    
-            od_dict = defaultdict(list)
-            for (o, d), paths in od_path_tuple:
-                for path_id, cost in paths:
-                    od_dict[(o, d)].append((path_id, cost))
-            
-            # Writing ioPathTuple
-            f.write(f"ioPathTuple = {self.format_for_opl(dict(io_dict))};\n")
-            # Writing odPathTuple
-            f.write(f"odPathTuple = {self.format_for_opl(dict(od_dict))};\n")
+            # Writing iodPathTuple
+            f.write(f"iodPathTuple = {self.format_for_opl(iod_path_tuple)};\n")
         mod_file = mod_path + "matching.mod"
         if CPLEXPATH is None:
             CPLEXPATH = "C:/Program Files/ibm/ILOG/CPLEX_Studio1210/opl/bin/x64_win64/"
@@ -307,7 +291,8 @@ class AMoDEnv:
             paxAction is None
         ):  # default matching algorithm used if isMatching is True, matching method will need the information of self.acc[t+1], therefore this part cannot be put forward
             pickAction, paxAction = self.matching(CPLEXPATH=CPLEXPATH, PATH=PATH, platform=platform)
-        self.paxAction = paxAction
+        self.pickAction = pickAction #pick_action[(i, j)][path_id] = flow
+        self.paxAction = paxAction #pax_action[(i, j)][path_id] = flow
         # Passenger serving
         for edge in self.network.edges(keys=True,data=False):
             if 
