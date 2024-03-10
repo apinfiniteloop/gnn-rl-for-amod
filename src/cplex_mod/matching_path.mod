@@ -4,8 +4,10 @@ tuple iodPathTuple{
     key int i; // Node ID
     key int o; // Origin ID
     key int d; // Destination ID
-    key int p; // Path ID
-    float cost; // Generalized cost of the path
+    key int id;
+    float c; // Cost
+    float de; // Demand
+    float p; // Price
 }
 
 tuple Accumulation {
@@ -13,9 +15,11 @@ tuple Accumulation {
     float acc; // Accumulation at node
 }
 
-tuple io_Edge {
-    key int i; // Node ID
-    key int j; // Node ID
+tuple iod_path {
+    key int i;
+    key int o;
+    key int d;
+    key int id;
 }
 
 tuple iod_Edge{
@@ -24,16 +28,28 @@ tuple iod_Edge{
     key int d; // Destination ID
 }
 
+
 string path = ...;
 {iodPathTuple} ioPathTuple = ...; // Mapping from (i,o,d) to paths and costs
 {Accumulation} accInitTuple = ...; // Initial accumulation at each node 
 
 {iod_Edge} demandEdge = {<i,o,d>|<i,o,d,id,c,de,p> in  ioPathTuple}
-{int} region = {i|<i,v> in Accumulation}
+{iod_path} demandPath = {<i,o,d,id>|<i,o,d,id,c,de,p> in ioPathTuple}
+{int} region = {i|<i,v> in accInitTuple}
 float accInit[region] = [i:v|<i,v> in accInitTuple]
-float demand[demandEdge] = [<i,o,d>:de|<i,o,d,id,c,de,p> in ioPathTuple]
-float price[demandEdge] = [<i,o,d>:p|<i,o,d,id,c,de,p> in ioPathTuple]
+float demand[demandPath] = [<i,o,d,id>:de|<i,o,d,id,c,de,p> in ioPathTuple]
+float price[demandPath] = [<i,o,d,id>:p|<i,o,d,id,c,de,p> in ioPathTuple]
+float cost[demandPath] = [<i,o,d,id>:c|<i,o,d,id,c,de,p> in ioPathTuple]
+dvar float+ demandFlow[demandPath];
+maximize(sum(i in demandPath) sum(o in demandPath) sum(d in demandPath) demandFlow[i,o,d]*(price[i,o,d]-cost[i,o,d])); //Needs revision
+subject to
+{
+    forall(i in region)
+        0<= accInit[i] - sum(o in demandPath) sum(d in demandPath) sum(id in demandPath) demandFlow[i,o,d,id];
 
+    forall(e in demandEdge)
+        demandFlow[e] <= demand[e];
+}
 
 
 // {int} V; // Set of node IDs
