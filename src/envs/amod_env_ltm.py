@@ -188,7 +188,7 @@ class AMoDEnv:
                                         if time in self.pax_demand and (o, d) in self.pax_demand[time] else (i, o, d, path_id, total_cost, 0, 0))
                     if (i, o, d) not in iod_path_dict:
                         iod_path_dict[(i, o, d)] = {}
-                    iod_path_dict[(i, o, d)][path_id] = (combined_path, total_cost)
+                    iod_path_dict[path_id] = (combined_path, total_cost)
                     path_id += 1
 
         return iod_path_tuple, iod_path_dict
@@ -308,13 +308,25 @@ class AMoDEnv:
             paxAction, paxPathDict = self.matching(CPLEXPATH=CPLEXPATH, PATH=PATH, platform=platform)
         self.paxAction = paxAction #pax_action[(i, j)][path_id] = flow
         # Passenger serving
-        # Obtain path demands from i to o, traversing path_id
-        io_path_demands = {pid: [flow for _ in range(self.total_time // self.time_step)] if flow > 1e-6 else [0 for _ in range(self.total_time // self.time_step)] for (i,o,d,pid), flow in paxAction.items()}
+        # Obtain path demands from i to o to d, traversing path_id
+        iod_path_demands = {pid: [flow for _ in range(self.total_time // self.time_step)] if flow > 1e-6 else [0 for _ in range(self.total_time // self.time_step)] for (i,o,d,pid), flow in paxAction.items()}
         # Obtain link demands from path demands
         if self.link_demands is None:
             self.link_demands = {edge: {time: 0 for time in range(self.total_time // self.time_step)} for edge in self.network.edges(keys=True)}
-            
-
+        for pid, flow in iod_path_demands.items():
+            for time, demand in enumerate(flow):
+                for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
+                    self.link_demands[(edge_start, edge_end, edge_key)][time] += demand
+                    # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
+                    if edge_start == paxPathDict[pid][0][0]:
+                        for edge in self.network.in_edges(edge_start, keys=True):
+                            if self.network.edges[edge]["type"] == "origin":
+                                self.link_demands[edge][time] += demand
+                    # Same for edge_end
+                    if edge_end == paxPathDict[pid][0][-1]:
+                        for edge in self.network.out_edges(edge_end, keys=True):
+                            if self.network.edges[edge]["type"] == "destination":
+                                self.link_demands[edge][time] += demand
         # Do a step in vehicle rebalancing
 
         # Do a step in LTM        
@@ -430,7 +442,7 @@ class Scenario:
         else:
             # If Using json file. TODO: Need a json file to complete.
 
-            # raise NotImplementedError
+            raise NotImplementedError
         self.initial_travel_time = {
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
