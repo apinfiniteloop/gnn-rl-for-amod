@@ -32,9 +32,7 @@ class AMoDEnv:
         self.paths = scenario.all_paths
         self.origins = scenario.origins
         self.destinations = scenario.destinations
-        self.pax_demand = (
-            scenario.pax_demand
-        )  # {(origin, destination): (demand, price)}
+        self.pax_demand = scenario.pax_demand # {(origin, destination): (demand, price)}
         self.path_demands = scenario.path_demands
         self.link_demands = scenario.link_demands
         self.served_demand = defaultdict(dict)
@@ -180,7 +178,14 @@ class AMoDEnv:
                     # Calculate the total cost of the combined path
                     total_cost = sum(gen_cost[edge][time] for edge in zip(combined_path[:-1], combined_path[1:]))
                     # Update tuples and dictionaries with the new path and its cost
-                    iod_path_tuple.append((i, o, d, path_id, total_cost, self.pax_demand[time][(o, d)][0], self.pax_demand[time][(o, d)][1]) if time in self.pax_demand and (o, d) in self.pax_demand[time] else (i, o, d, path_id, total_cost, 0, 0))
+                    iod_path_tuple.append((i, # Vehicle current location
+                                        o, # Trip origin
+                                        d, # Trip destination
+                                        path_id, # Unique Path ID
+                                        total_cost, # Total cost of the path (generalized)
+                                        self.pax_demand[time][(o, d)][0], # Demand
+                                        self.pax_demand[time][(o, d)][1]) # Price
+                                        if time in self.pax_demand and (o, d) in self.pax_demand[time] else (i, o, d, path_id, total_cost, 0, 0))
                     if (i, o, d) not in iod_path_dict:
                         iod_path_dict[(i, o, d)] = {}
                     iod_path_dict[(i, o, d)][path_id] = (combined_path, total_cost)
@@ -258,12 +263,22 @@ class AMoDEnv:
                 [CPLEXPATH + "oplrun", mod_file, data_file], stdout=output_f, env=my_env
             )
         output_f.close()
-        io_flow = defaultdict(float)
+        flow = defaultdict(float)
         # Retrieve and process the result file. TODO: Write it.
-
-        # pick_action: Retreived from OPL and formulated to be used in pax_step and LTM. pick_action[(i, j)][path_id] = flow
-        # pax_action: Retreived from OPL and formulated to be used in pax_step and LTM. pax_action[(i, j)][path_id] = flow
-        return pick_action, pax_action
+        with open(resfile, "r", encoding="utf8") as file:
+            for row in file:
+                item = row.replace("e)", ")").strip().strip(";").split("=")
+                if item[0] == "flow":
+                    values = item[1].strip(")]").strip("[(").split(")(")
+                    for v in values:
+                        if len(v) == 0:
+                            continue
+                        i, o, d, pid, f = v.split(",")
+                        flow[int(i), int(o), int(d), int(pid)] = float(f)
+        pax_action = {(i,o,d,pid): flow[i,o,d,pid] if (i,o,d,pid) in flow else 0 for i, o, d, pid, _, _, _ in iod_path_tuple}
+        # pax_action: Retreived from OPL and formulated to be used in pax_step and LTM. pax_action[(i,o,d,path_id)] = flow starting from i to o to d, using path_id. For path_id correspondence see iod_path_tuple.
+        # iod_path_dict: Formulated to be used in pax_step and LTM. iod_path_dict[(i,o,d)][path_id] = (path, cost)
+        return pax_action, iod_path_dict
 
     def ltm_step(self, use_ctm_at_merge=False, pick_action=None, pax_action=None, reb_action=None, CPLEXPATH=None, PATH="", platform="win"):
         """
@@ -290,12 +305,15 @@ class AMoDEnv:
         if (
             paxAction is None
         ):  # default matching algorithm used if isMatching is True, matching method will need the information of self.acc[t+1], therefore this part cannot be put forward
-            pickAction, paxAction = self.matching(CPLEXPATH=CPLEXPATH, PATH=PATH, platform=platform)
-        self.pickAction = pickAction #pick_action[(i, j)][path_id] = flow
+            paxAction, paxPathDict = self.matching(CPLEXPATH=CPLEXPATH, PATH=PATH, platform=platform)
         self.paxAction = paxAction #pax_action[(i, j)][path_id] = flow
         # Passenger serving
-        for edge in self.network.edges(keys=True,data=False):
-            if 
+        # Obtain path demands from i to o, traversing path_id
+        io_path_demands = {pid: [flow for _ in range(self.total_time // self.time_step)] if flow > 1e-6 else [0 for _ in range(self.total_time // self.time_step)] for (i,o,d,pid), flow in paxAction.items()}
+        # Obtain link demands from path demands
+        if self.link_demands is None:
+            self.link_demands = {edge: {time: 0 for time in range(self.total_time // self.time_step)} for edge in self.network.edges(keys=True)}
+            
 
         # Do a step in vehicle rebalancing
 
@@ -411,7 +429,8 @@ class Scenario:
             )
         else:
             # If Using json file. TODO: Need a json file to complete.
-            raise NotImplementedError
+
+            # raise NotImplementedError
         self.initial_travel_time = {
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
