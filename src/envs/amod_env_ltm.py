@@ -32,7 +32,9 @@ class AMoDEnv:
         self.paths = scenario.all_paths
         self.origins = scenario.origins
         self.destinations = scenario.destinations
-        self.pax_demand = scenario.pax_demand # {(origin, destination): (demand, price)}
+        self.pax_demand = (
+            scenario.pax_demand
+        )  # {(origin, destination): (demand, price)}
         self.path_demands = scenario.path_demands
         self.link_demands = scenario.link_demands
         self.served_demand = defaultdict(dict)
@@ -144,8 +146,10 @@ class AMoDEnv:
                 - self.cvn[tuple(edge)][t][0],
                 edge_attrib["q_max"] * delta_t,
             )
-        
-    def generate_path_ids(self, network, pax_demand, time, gen_cost, acc, origins, destinations):
+
+    def generate_path_ids(
+        self, network, pax_demand, time, gen_cost, acc, origins, destinations
+    ):
         """
         Generate unique path IDs and their costs for IOD paths.
 
@@ -161,10 +165,10 @@ class AMoDEnv:
         - iod_path_tuple: A list of tuples for IOD paths with path IDs and costs.
         - iod_path_dict: A dictionary of dictionaries for IOD paths with path IDs and costs.
         """
-        
+
         path_id = 0
         iod_path_tuple = []
-        iod_path_dict = {} # iod_path_dict[(i,o,d)][path_id] = (path, cost)
+        iod_path_dict = {}  # iod_path_dict[(i,o,d)][path_id] = (path, cost)
 
         # Generate IOD paths with unique IDs
         for i, o, d in product(self.acc.keys(), origins, destinations):
@@ -176,23 +180,31 @@ class AMoDEnv:
                     # Combine IO and OD paths, excluding the duplicate occurrence of 'o'
                     combined_path = io_path + od_path[1:]
                     # Calculate the total cost of the combined path
-                    total_cost = sum(gen_cost[edge][time] for edge in zip(combined_path[:-1], combined_path[1:]))
+                    total_cost = sum(
+                        gen_cost[edge][time]
+                        for edge in zip(combined_path[:-1], combined_path[1:])
+                    )
                     # Update tuples and dictionaries with the new path and its cost
-                    iod_path_tuple.append((i, # Vehicle current location
-                                        o, # Trip origin
-                                        d, # Trip destination
-                                        path_id, # Unique Path ID
-                                        total_cost, # Total cost of the path (generalized)
-                                        self.pax_demand[time][(o, d)][0], # Demand
-                                        self.pax_demand[time][(o, d)][1]) # Price
-                                        if time in self.pax_demand and (o, d) in self.pax_demand[time] else (i, o, d, path_id, total_cost, 0, 0))
+                    iod_path_tuple.append(
+                        (
+                            i,  # Vehicle current location
+                            o,  # Trip origin
+                            d,  # Trip destination
+                            path_id,  # Unique Path ID
+                            total_cost,  # Total cost of the path (generalized)
+                            self.pax_demand[time][(o, d)][0],  # Demand
+                            self.pax_demand[time][(o, d)][1],
+                        )  # Price
+                        if time in self.pax_demand and (o, d) in self.pax_demand[time]
+                        else (i, o, d, path_id, total_cost, 0, 0)
+                    )
                     if (i, o, d) not in iod_path_dict:
                         iod_path_dict[(i, o, d)] = {}
-                    iod_path_dict[path_id] = (combined_path, total_cost)
+                    iod_path_dict[path_id] = (combined_path, total_cost, (i, o, d))
                     path_id += 1
 
         return iod_path_tuple, iod_path_dict
-    
+
     def format_for_opl(self, value):
         """Format Python data types into strings that OPL can parse."""
         if isinstance(value, list):
@@ -200,10 +212,13 @@ class AMoDEnv:
         elif isinstance(value, tuple):
             return "<" + ",".join(self.format_for_opl(v) for v in value) + ">"
         elif isinstance(value, dict):
-            return "{" + " ".join(f"{k}={self.format_for_opl(v)}" for k, v in value.items()) + "}"
+            return (
+                "{"
+                + " ".join(f"{k}={self.format_for_opl(v)}" for k, v in value.items())
+                + "}"
+            )
         else:
             return str(value)
-
 
     def matching(self, CPLEXPATH=None, PATH="", platform="win"):
         """
@@ -275,12 +290,25 @@ class AMoDEnv:
                             continue
                         i, o, d, pid, f = v.split(",")
                         flow[int(i), int(o), int(d), int(pid)] = float(f)
-        pax_action = {(i,o,d,pid): flow[i,o,d,pid] if (i,o,d,pid) in flow else 0 for i, o, d, pid, _, _, _ in iod_path_tuple}
+        pax_action = {
+            (i, o, d, pid): flow[i, o, d, pid] if (i, o, d, pid) in flow else 0
+            for i, o, d, pid, _, _, _ in iod_path_tuple
+        }
         # pax_action: Retreived from OPL and formulated to be used in pax_step and LTM. pax_action[(i,o,d,path_id)] = flow starting from i to o to d, using path_id. For path_id correspondence see iod_path_tuple.
-        # iod_path_dict: Formulated to be used in pax_step and LTM. iod_path_dict[(i,o,d)][path_id] = (path, cost)
+        # iod_path_dict: Formulated to be used in pax_step and LTM. iod_path_dict[path_id] = (path, cost)
         return pax_action, iod_path_dict
 
-    def ltm_step(self, use_ctm_at_merge=False, pick_action=None, pax_action=None, reb_action=None, CPLEXPATH=None, PATH="", platform="win"):
+    def ltm_step(
+        self,
+        use_ctm_at_merge=False,
+        pick_action=None,
+        pax_action=None,
+        reb_action=None,
+        CPLEXPATH=None,
+        do_reb=True,
+        PATH="",
+        platform="win",
+    ):
         """
         Perform a step in the LTM simulation.
 
@@ -297,7 +325,7 @@ class AMoDEnv:
         delta_t = self.time_step
         # Do a step in passenger matching
         for i in self.network.nodes:
-            self.acc[t+1][i]=self.acc[t][i]
+            self.acc[t + 1][i] = self.acc[t][i]
         self.info["served_demand"] = 0  # initialize served demand
         self.info["operating_cost"] = 0  # initialize operating cost
         self.info["revenue"] = 0
@@ -305,85 +333,214 @@ class AMoDEnv:
         if (
             paxAction is None
         ):  # default matching algorithm used if isMatching is True, matching method will need the information of self.acc[t+1], therefore this part cannot be put forward
-            paxAction, paxPathDict = self.matching(CPLEXPATH=CPLEXPATH, PATH=PATH, platform=platform)
-        self.paxAction = paxAction #pax_action[(i, j)][path_id] = flow
+            paxAction, paxPathDict = self.matching(
+                CPLEXPATH=CPLEXPATH, PATH=PATH, platform=platform
+            )
+        self.paxAction = paxAction  # pax_action[(i, j)][path_id] = flow
         # Passenger serving
         # Obtain path demands from i to o to d, traversing path_id
-        iod_path_demands = {pid: [flow for _ in range(self.total_time // self.time_step)] if flow > 1e-6 else [0 for _ in range(self.total_time // self.time_step)] for (i,o,d,pid), flow in paxAction.items()}
+        # iod_path_demands = {pid: [flow for _ in range(self.total_time // self.time_step)] if flow > 1e-6 else [0 for _ in range(self.total_time // self.time_step)] for (_, _, _, pid), flow in paxAction.items()}
+        iod_path_demands = {
+            pid: flow if flow > 1e-6 else 0
+            for (_, _, _, pid), flow in paxAction.items()
+        }
         # Obtain link demands from path demands
         if self.link_demands is None:
-            self.link_demands = {edge: {time: 0 for time in range(self.total_time // self.time_step)} for edge in self.network.edges(keys=True)}
+            self.link_demands = {
+                edge: {time: 0 for time in range(self.total_time // self.time_step)}
+                for edge in self.network.edges(keys=True)
+            }
         for pid, flow in iod_path_demands.items():
-            for time, demand in enumerate(flow):
-                for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
-                    self.link_demands[(edge_start, edge_end, edge_key)][time] += demand
-                    # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
-                    if edge_start == paxPathDict[pid][0][0]:
-                        for edge in self.network.in_edges(edge_start, keys=True):
-                            if self.network.edges[edge]["type"] == "origin":
-                                self.link_demands[edge][time] += demand
-                    # Same for edge_end
-                    if edge_end == paxPathDict[pid][0][-1]:
-                        for edge in self.network.out_edges(edge_end, keys=True):
-                            if self.network.edges[edge]["type"] == "destination":
-                                self.link_demands[edge][time] += demand
-        # Do a step in vehicle rebalancing
+            for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
+                self.link_demands[(edge_start, edge_end, edge_key)][t] += flow
+                # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
+                if edge_start == paxPathDict[pid][0][0][0]:
+                    for edge in self.network.in_edges(edge_start, keys=True):
+                        if self.network.edges[edge]["type"] == "origin":
+                            self.link_demands[edge][t] += flow
+                # Same for edge_end
+                if edge_end == paxPathDict[pid][0][-1][1]:
+                    for edge in self.network.out_edges(edge_end, keys=True):
+                        if self.network.edges[edge]["type"] == "destination":
+                            self.link_demands[edge][t] += flow
+            # Update the served demand and the revenue
+            o, d = paxPathDict[pid][2][1], paxPathDict[pid][2][2]
+            assert iod_path_demands[pid] < self.acc[o][t + 1] + 1e-3
+            self.servedDemand[o, d][t] = self.iod_path_demands[pid]
+            self.paxFlow[o, d][t + self.demandTime[pid][t]] = self.iod_path_demands[pid]
+            self.info["operating_cost"] += (
+                self.demandTime[pid][t] * self.beta * self.iod_path_demands[pid]
+            )  # TODO: Need definition for self.demandTime
+            self.acc[i][t + 1] -= self.iod_path_demands[pid]
+            self.info["served_demand"] += self.servedDemand[pid][t]
+            self.dacc[d][t + self.demandTime[pid][t]] += self.paxFlow[pid][
+                t + self.demandTime[pid][t]
+            ]
+            self.reward += self.iod_path_demand[pid] * (
+                self.pax_demand[t][(o, d)][1] - self.beta * self.iod_path_demand[pid]
+            )
+            self.info["revenue"] += (
+                self.iod_path_demand[pid] * self.pax_demand[t][(o, d)][1]
+            )
 
-        # Do a step in LTM        
+        # Do a step in vehicle rebalancing
+        if do_reb:
+            self.reward = 0
+            self.rebAction = rebAction
+
+        # Do a step in LTM
         for node in self.network.nodes:
             # For each node, calculate the sending flow and receiving flow of its connected edges
-            for edge in set(out_edges := self.network.out_edges(nbunch=node, keys=True)) | set(in_edges := self.network.in_edges(nbunch=node, keys=True)):
-                self.sending_flow[tuple(edge)][t] = self.calculate_sending_flow(edge, self.network.edges[edge], t)
-                self.receiving_flow[tuple(edge)][t] = self.calculate_receiving_flow(edge, self.network.edges[edge], t)
+            for edge in set(
+                out_edges := self.network.out_edges(nbunch=node, keys=True)
+            ) | set(in_edges := self.network.in_edges(nbunch=node, keys=True)):
+                self.sending_flow[tuple(edge)][t] = self.calculate_sending_flow(
+                    edge, self.network.edges[edge], t
+                )
+                self.receiving_flow[tuple(edge)][t] = self.calculate_receiving_flow(
+                    edge, self.network.edges[edge], t
+                )
             # If is origin node, update N(x, t) for outgoing edges
             if len(in_edges) == 0 and len(out_edges) == 1:
-                transition_flow = min(sum([self.path_demands[i][t + delta_t] for i in self.path_demands.keys()]), self.receiving_flow[tuple(out_edges)[0]][t])
-                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = self.cvn[tuple(out_edges)[0]][t][0] + transition_flow
+                transition_flow = min(
+                    sum(
+                        [
+                            self.path_demands[i][t + delta_t]
+                            for i in self.path_demands.keys()
+                        ]
+                    ),
+                    self.receiving_flow[tuple(out_edges)[0]][t],
+                )
+                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = (
+                    self.cvn[tuple(out_edges)[0]][t][0] + transition_flow
+                )
             # If is homogenous node, update N(x, t) for outgoing edges
             elif len(in_edges) == 1 and len(out_edges) == 1:
-                transition_flow = min(self.sending_flow[tuple(in_edges)[0]][t], self.receiving_flow[tuple(out_edges)[0]][t])
-                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = self.cvn[tuple(in_edges)[0]][t][1] + transition_flow
-                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = self.cvn[tuple(out_edges)[0]][t][0] + transition_flow
+                transition_flow = min(
+                    self.sending_flow[tuple(in_edges)[0]][t],
+                    self.receiving_flow[tuple(out_edges)[0]][t],
+                )
+                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = (
+                    self.cvn[tuple(in_edges)[0]][t][1] + transition_flow
+                )
+                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = (
+                    self.cvn[tuple(out_edges)[0]][t][0] + transition_flow
+                )
             # If is split node, update N(x, t) for outgoing edges
             elif len(in_edges) == 1 and len(out_edges) > 1:
                 sum_transition_flow = 0
                 for edge in out_edges:
                     try:
-                        p = self.link_demands[edge][t] / self.link_demands[tuple(in_edges)[0]][t]
-                        transition_flow = p * min(self.sending_flow[tuple(in_edges)[0]][t], min([self.receiving_flow[e][t] / (self.link_demands[e][t] / self.link_demands[tuple(in_edges)[0]][t]) for e in out_edges]))
+                        p = (
+                            self.link_demands[edge][t]
+                            / self.link_demands[tuple(in_edges)[0]][t]
+                        )
+                        transition_flow = p * min(
+                            self.sending_flow[tuple(in_edges)[0]][t],
+                            min(
+                                [
+                                    self.receiving_flow[e][t]
+                                    / (
+                                        self.link_demands[e][t]
+                                        / self.link_demands[tuple(in_edges)[0]][t]
+                                    )
+                                    for e in out_edges
+                                ]
+                            ),
+                        )
                     except ZeroDivisionError:
                         transition_flow = 0
-                    self.cvn[tuple(edge)][t + delta_t][0] = self.cvn[tuple(edge)][t][0] + round(transition_flow)
+                    self.cvn[tuple(edge)][t + delta_t][0] = self.cvn[tuple(edge)][t][
+                        0
+                    ] + round(transition_flow)
                     sum_transition_flow += transition_flow
-                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = self.cvn[tuple(in_edges)[0]][t][1] + round(sum_transition_flow)
+                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = self.cvn[
+                    tuple(in_edges)[0]
+                ][t][1] + round(sum_transition_flow)
             # If is merge node, update N(x, t) for outgoing edges
             elif len(in_edges) > 1 and len(out_edges) == 1:
                 sum_transition_flow = 0
                 for edge in in_edges:
                     if use_ctm_at_merge:
-                        transition_flow = sorted([self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t] - (sum(self.sending_flow[k][t] for k in in_edges) - self.sending_flow[edge][t]), p * self.receiving_flow[tuple(out_edges)[0]][t]])[1]
+                        transition_flow = sorted(
+                            [
+                                self.sending_flow[edge][t],
+                                self.receiving_flow[tuple(out_edges)[0]][t]
+                                - (
+                                    sum(self.sending_flow[k][t] for k in in_edges)
+                                    - self.sending_flow[edge][t]
+                                ),
+                                p * self.receiving_flow[tuple(out_edges)[0]][t],
+                            ]
+                        )[1]
                     else:
                         try:
-                            p = self.link_demands[edge][t] / self.link_demands[tuple(out_edges)[0]][t]
-                            transition_flow = min(self.sending_flow[edge][t], self.receiving_flow[tuple(out_edges)[0]][t] * self.sending_flow[edge][t] / (sum([self.sending_flow[e][t] for e in in_edges])))
+                            p = (
+                                self.link_demands[edge][t]
+                                / self.link_demands[tuple(out_edges)[0]][t]
+                            )
+                            transition_flow = min(
+                                self.sending_flow[edge][t],
+                                self.receiving_flow[tuple(out_edges)[0]][t]
+                                * self.sending_flow[edge][t]
+                                / (sum([self.sending_flow[e][t] for e in in_edges])),
+                            )
                         except ZeroDivisionError:
                             transition_flow = 0
-                        self.cvn[edge][t + delta_t][1] = self.cvn[edge][t][1] + transition_flow
+                        self.cvn[edge][t + delta_t][1] = (
+                            self.cvn[edge][t][1] + transition_flow
+                        )
                         sum_transition_flow += transition_flow
-                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = self.cvn[tuple(out_edges)[0]][t][0] + sum_transition_flow
+                self.cvn[tuple(out_edges)[0]][t + delta_t][0] = (
+                    self.cvn[tuple(out_edges)[0]][t][0] + sum_transition_flow
+                )
             # If is destination node, update N(x, t) for outgoing edges
             elif len(in_edges) == 1 and len(out_edges) == 0:
                 transition_flow = self.sending_flow[tuple(in_edges)[0]][t]
-                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = self.cvn[tuple(in_edges)[0]][t][1] + transition_flow
+                self.cvn[tuple(in_edges)[0]][t + delta_t][1] = (
+                    self.cvn[tuple(in_edges)[0]][t][1] + transition_flow
+                )
             # If is normal node, update N(x, t) for outgoing edges
             elif len(in_edges) > 1 and len(out_edges) > 1:
-                sum_inout = sum([self.node_transition_demand[node][i][j][t] for i in in_edges for j in out_edges])
+                sum_inout = sum(
+                    [
+                        self.node_transition_demand[node][i][j][t]
+                        for i in in_edges
+                        for j in out_edges
+                    ]
+                )
                 for in_edge in in_edges:
                     for out_edge in out_edges:
-                        p = self.node_transition_demand[node][in_edge][out_edge][t] / sum_inout
-                        transition_flow = p * min(min([self.receiving_flow[out_edge][t] * self.sending_flow[in_edge][t] / (sum([self.node_transition_demand[node][i][out_edge] * self.sending_flow[i][t] for i in in_edges]))]), self.sending_flow[in_edge][t])
-                        self.cvn[out_edge][t + delta_t][0] = self.cvn[out_edge][t][0] + transition_flow
-                        self.cvn[in_edge][t + delta_t][1] = self.cvn[in_edge][t][1] + transition_flow
+                        p = (
+                            self.node_transition_demand[node][in_edge][out_edge][t]
+                            / sum_inout
+                        )
+                        transition_flow = p * min(
+                            min(
+                                [
+                                    self.receiving_flow[out_edge][t]
+                                    * self.sending_flow[in_edge][t]
+                                    / (
+                                        sum(
+                                            [
+                                                self.node_transition_demand[node][i][
+                                                    out_edge
+                                                ]
+                                                * self.sending_flow[i][t]
+                                                for i in in_edges
+                                            ]
+                                        )
+                                    )
+                                ]
+                            ),
+                            self.sending_flow[in_edge][t],
+                        )
+                        self.cvn[out_edge][t + delta_t][0] = (
+                            self.cvn[out_edge][t][0] + transition_flow
+                        )
+                        self.cvn[in_edge][t + delta_t][1] = (
+                            self.cvn[in_edge][t][1] + transition_flow
+                        )
         self.time += delta_t
 
 
@@ -441,7 +598,6 @@ class Scenario:
             )
         else:
             # If Using json file. TODO: Need a json file to complete.
-
             raise NotImplementedError
         self.initial_travel_time = {
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
