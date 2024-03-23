@@ -298,29 +298,7 @@ class AMoDEnv:
         # iod_path_dict: Formulated to be used in pax_step and LTM. iod_path_dict[path_id] = (path, cost)
         return pax_action, iod_path_dict
 
-    def ltm_step(
-        self,
-        use_ctm_at_merge=False,
-        pick_action=None,
-        pax_action=None,
-        reb_action=None,
-        CPLEXPATH=None,
-        do_reb=True,
-        PATH="",
-        platform="win",
-    ):
-        """
-        Perform a step in the LTM simulation.
-
-        Args:
-            `use_ctm_at_merge` (bool, optional): Flag indicating whether to use the Daganzo CTM model at merge nodes. Defaults to False.
-            `pick_action` (None, optional): Not used in this method. Defaults to None.
-            `pax_action` (None, optional): Not used in this method. Defaults to None.
-            `reb_action` (None, optional): Not used in this method. Defaults to None.
-            `CPLEXPATH` (None, optional): Not used in this method. Defaults to None.
-            `PATH` (str, optional): Not used in this method. Defaults to "".
-            `platform` (str, optional): Platform identifier. Defaults to "win".
-        """
+    def pax_step(self, paxAction=None, CPLEXPATH=None, PATH="", platform="win"):
         t = self.time
         delta_t = self.time_step
         # Do a step in passenger matching
@@ -382,6 +360,27 @@ class AMoDEnv:
             self.info["revenue"] += (
                 self.iod_path_demand[pid] * self.pax_demand[t][(o, d)][1]
             )
+        
+        self.obs = (
+            self.acc,
+            self.time,
+            self.dacc,
+            self.pax_demand
+        )
+        done = False
+        return self.obs, max(0, self.reward), done, self.info
+
+    def ltm_step(
+        self,
+        use_ctm_at_merge=False,
+        pick_action=None,
+        pax_action=None,
+        reb_action=None,
+        CPLEXPATH=None,
+        do_reb=True,
+        PATH="",
+        platform="win",
+    ):
 
         # Do a step in vehicle rebalancing
         if do_reb:
