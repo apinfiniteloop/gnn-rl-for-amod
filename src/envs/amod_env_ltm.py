@@ -360,33 +360,71 @@ class AMoDEnv:
             self.info["revenue"] += (
                 self.iod_path_demand[pid] * self.pax_demand[t][(o, d)][1]
             )
-        
-        self.obs = (
-            self.acc,
-            self.time,
-            self.dacc,
-            self.pax_demand
-        )
+
+        self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
         done = False
         return self.obs, max(0, self.reward), done, self.info
 
-    def ltm_step(
-        self,
-        use_ctm_at_merge=False,
-        pick_action=None,
-        pax_action=None,
-        reb_action=None,
-        CPLEXPATH=None,
-        do_reb=True,
-        PATH="",
-        platform="win",
-    ):
+    def reb_step(self, rebAction):
+        t = self.time
+        self.reward = 0
+        self.rebAction = rebAction
+        # Rebalancing
+        for k, (edge_start, edge_end, edge_key) in enumerate(
+            self.network.edges(keys=True, data=False)
+        ):
+            self.rebAction[k] = min(self.acc[i][t + 1], rebAction[k])
+            self.rebFlow[edge_start, edge_end, edge_key][
+                t + self.rebTime[edge_start, edge_end, edge_key][t]
+            ] = self.rebAction[k]
+            self.acc[edge_start][t + 1] -= self.rebAction[k]
+            self.dacc[edge_end][
+                t + self.rebTime[edge_start, edge_end, edge_key][t]
+            ] += self.rebFlow[edge_start, edge_end, edge_key][
+                t + self.rebTime[edge_start, edge_end, edge_key][t]
+            ]
+            self.info["rebalancing_cost"] += (
+                self.rebTime[edge_start, edge_end, edge_key][t]
+                * self.beta
+                * self.rebAction[k]
+            )
+            self.info["operating_cost"] += (
+                self.rebTime[edge_start, edge_end, edge_key][t]
+                * self.beta
+                * self.rebAction[k]
+            )
+            self.reward -= (
+                self.rebAction[k]
+                * self.beta
+                * self.rebTime[edge_start, edge_end, edge_key][t]
+            )
+        # arrival for the next time step, executed in the last state of a time step
+        # this makes the code slightly different from the previous version, where the following codes are executed between matching and rebalancing
+        for k, (edge_start, edge_end, edge_key) in enumerate(
+            self.network.edges(keys=True, data=False)
+        ):
+            if (edge_start, edge_end, edge_key) in self.rebFlow and t in self.rebFlow[
+                edge_start, edge_end, edge_key
+            ]:
+                self.acc[edge_end][t + 1] += self.rebFlow[
+                    edge_start, edge_end, edge_key
+                ][t]
+            if (edge_start, edge_end, edge_key) in self.paxFlow and t in self.paxFlow[
+                edge_start, edge_end, edge_key
+            ]:
+                self.acc[edge_end][t + 1] += self.paxFlow[
+                    edge_start, edge_end, edge_key
+                ][
+                    t
+                ]  # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
+        
+        self.time += 1
+        self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
+        done = self.time == self.total_time
+        return self.obs, self.reward, done, self.info
 
-        # Do a step in vehicle rebalancing
-        if do_reb:
-            self.reward = 0
-            self.rebAction = rebAction
-
+    def ltm_step(self, use_ctm_at_merge=False):
+        t = self.time
         # Do a step in LTM
         for node in self.network.nodes:
             # For each node, calculate the sending flow and receiving flow of its connected edges
@@ -540,7 +578,7 @@ class AMoDEnv:
                         self.cvn[in_edge][t + delta_t][1] = (
                             self.cvn[in_edge][t][1] + transition_flow
                         )
-        self.time += delta_t
+        self.time += self.time_step
 
 
 class Scenario:
