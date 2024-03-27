@@ -322,6 +322,7 @@ class AMoDEnv:
             pid: flow if flow > 1e-6 else 0
             for (_, _, _, pid), flow in paxAction.items()
         }
+        self.path_demands[paxPathDict[pid][0]][t] = iod_path_demands[pid]
         # Obtain link demands from path demands
         if self.link_demands is None:
             self.link_demands = {
@@ -329,6 +330,7 @@ class AMoDEnv:
                 for edge in self.network.edges(keys=True)
             }
         for pid, flow in iod_path_demands.items():
+            self.path_demands[paxPathDict[pid][0]][t+delta_t] += flow
             for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
                 self.link_demands[(edge_start, edge_end, edge_key)][t] += flow
                 # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
@@ -425,6 +427,7 @@ class AMoDEnv:
 
     def ltm_step(self, use_ctm_at_merge=False):
         t = self.time
+        delta_t = self.time_step
         # Do a step in LTM
         for node in self.network.nodes:
             # For each node, calculate the sending flow and receiving flow of its connected edges
@@ -439,12 +442,14 @@ class AMoDEnv:
                 )
             # If is origin node, update N(x, t) for outgoing edges
             if len(in_edges) == 0 and len(out_edges) == 1:
+                out_node = tuple(out_edges)[0][1]
                 transition_flow = min(
                     sum(
-                        [
-                            self.path_demands[i][t + delta_t]
-                            for i in self.path_demands.keys()
-                        ]
+                        # [
+                        #     self.path_demands[i][t + delta_t]
+                        #     for i in self.path_demands.keys()
+                        # ]
+                        self.path_demands[path][t+delta_t] for path in self.path_demands.keys() if path[0][0] == out_node else 0
                     ),
                     self.receiving_flow[tuple(out_edges)[0]][t],
                 )
