@@ -648,27 +648,30 @@ class Scenario:
         self.origins = {}  # {time: [origins]}
         self.destinations = {}  # {time: [destinations]}
 
-    def _load_sample_network(self):
+    def _load_sample_network(self, name):
         """
         Loads sample network.
         """
-        G = nx.MultiDiGraph()
+        if name == 'sample':
+            G = nx.MultiDiGraph()
 
-        # G.add_node("Or")
-        G.add_node("A")
-        G.add_node("B")
-        G.add_node("C")
-        G.add_node("D")
-        # G.add_node("De")
+            # G.add_node("Or")
+            G.add_node("A")
+            G.add_node("B")
+            G.add_node("C")
+            G.add_node("D")
+            # G.add_node("De")
 
-        # G.add_edge("Or", "A", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type="origin")
-        G.add_edge("A", "B", length=5, q_max=50, k_j=300, w=0.1, type="normal")
-        G.add_edge("B", "C", length=10, q_max=50, k_j=300, w=0.1, type="normal")
-        G.add_edge("C", "D", length=10, q_max=50, k_j=60, w=0.1, type="normal")
-        G.add_edge("C", "D", length=10, q_max=50, k_j=30, w=0.1, type="normal")
-        # G.add_edge(
-        #     "D", "De", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type="destination"
-        # )
+            # G.add_edge("Or", "A", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type="origin")
+            G.add_edge("A", "B", length=5, q_max=50, k_j=300, w=0.1, type="normal")
+            G.add_edge("B", "C", length=10, q_max=50, k_j=300, w=0.1, type="normal")
+            G.add_edge("C", "D", length=10, q_max=50, k_j=60, w=0.1, type="normal")
+            G.add_edge("C", "D", length=10, q_max=50, k_j=30, w=0.1, type="normal")
+            # G.add_edge(
+            #     "D", "De", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type="destination"
+            # )
+        elif name == 'sioux_falls':
+            raise NotImplementedError
 
         return G
 
