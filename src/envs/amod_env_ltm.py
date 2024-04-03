@@ -149,7 +149,7 @@ class AMoDEnv:
             )
     
     def eval_network_gen_cost(self, time):
-        
+
 
     def approximate_gen_cost_function(self, current_traffic_flow, avg_traffic_flow, coeffs):
         approximation = coeffs[0]
@@ -345,8 +345,10 @@ class AMoDEnv:
             }
         for pid, flow in iod_path_demands.items():
             self.path_demands[paxPathDict[pid][0]][t+delta_t] += flow
+            link_travel_time = 0
             for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
                 self.link_demands[(edge_start, edge_end, edge_key)][t] += flow
+                link_travel_time += self.link_mean_travel_time[(edge_start, edge_end, edge_key)][t]
                 # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
                 if edge_start == paxPathDict[pid][0][0][0]:
                     for edge in self.network.in_edges(edge_start, keys=True):
@@ -361,14 +363,14 @@ class AMoDEnv:
             o, d = paxPathDict[pid][2][1], paxPathDict[pid][2][2]
             assert iod_path_demands[pid] < self.acc[o][t + 1] + 1e-3
             self.servedDemand[o, d][t] = self.iod_path_demands[pid]
-            self.paxFlow[o, d][t + self.demandTime[pid][t]] = self.iod_path_demands[pid]
+            self.paxFlow[o, d][t + link_travel_time] = self.iod_path_demands[pid]
             self.info["operating_cost"] += (
-                self.demandTime[pid][t] * self.beta * self.iod_path_demands[pid]
+                link_travel_time * self.beta * self.iod_path_demands[pid]
             )  # TODO: Need definition for self.demandTime
             self.acc[i][t + 1] -= self.iod_path_demands[pid]
             self.info["served_demand"] += self.servedDemand[pid][t]
-            self.dacc[d][t + self.demandTime[pid][t]] += self.paxFlow[pid][
-                t + self.demandTime[pid][t]
+            self.dacc[d][t + link_travel_time] += self.paxFlow[pid][
+                t + link_travel_time
             ]
             self.reward += self.iod_path_demand[pid] * (
                 self.pax_demand[t][(o, d)][1] - self.beta * self.iod_path_demand[pid]
