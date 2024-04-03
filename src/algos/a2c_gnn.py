@@ -108,15 +108,17 @@ class GNNParser:
 class GNNActor(nn.Module):
     """
     Actor \pi(a_t | s_t) parametrizing the concentration parameters of a Dirichlet Policy.
+    `D` is the dimensions of the parameter space for the Dirichlet distribution. Defaults to 1.
+    `T` is the dimensions of the parameter space for the Taylor's series. Defaults to 0 (disabled). Change to 1 if considering the approximation of BPR.
     """
 
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, D=1, T=0):
         super().__init__()
 
         self.conv1 = GCNConv(in_channels, in_channels)
         self.lin1 = nn.Linear(in_channels, 32)
         self.lin2 = nn.Linear(32, 32)
-        self.lin3 = nn.Linear(32, 1)
+        self.lin3 = nn.Linear(32, D + T)
 
     def forward(self, data):
         out = F.relu(self.conv1(data.x, data.edge_index))
@@ -171,6 +173,8 @@ class A2C(nn.Module):
         input_size,
         eps=np.finfo(np.float32).eps.item(),
         device=torch.device("cpu"),
+        D=1,
+        T=1,
     ):
         super(A2C, self).__init__()
         self.env = env
@@ -179,7 +183,10 @@ class A2C(nn.Module):
         self.hidden_size = input_size
         self.device = device
 
-        self.actor = GNNActor(self.input_size, self.hidden_size)
+        self.D = D
+        self.T = T
+
+        self.actor = GNNActor(self.input_size, self.hidden_size, D, T)
         self.critic = GNNCritic(self.input_size, self.hidden_size)
         self.obs_parser = GNNParser(self.env)
 
@@ -199,11 +206,18 @@ class A2C(nn.Module):
 
         # actor: computes concentration parameters of a Dirichlet distribution
         a_out = self.actor(x)
-        concentration = F.softplus(a_out).reshape(-1) + jitter
+        concentration = F.softplus(a_out[:, : self.D]).reshape(-1) + jitter
+        # Handle case when T=0 (no Taylor series parameters)
+        if (
+            a_out.shape[1] > self.D
+        ):  # Check if there are more outputs beyond Dirichlet parameters
+            taylor_params = a_out[:, self.D :]  # Extract Taylor series parameters
+        else:
+            taylor_params = None  # Or an appropriate default value indicating no Taylor series parameters
 
         # critic: estimates V(s_t)
         value = self.critic(x)
-        return concentration, value
+        return concentration, taylor_params, value
 
     def parse_obs(self, obs):
         state = self.obs_parser.parse_obs(obs)
