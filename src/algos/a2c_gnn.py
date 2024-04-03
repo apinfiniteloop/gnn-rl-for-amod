@@ -173,8 +173,7 @@ class A2C(nn.Module):
         input_size,
         eps=np.finfo(np.float32).eps.item(),
         device=torch.device("cpu"),
-        D=1,
-        T=1,
+        estimate_bpr=False,
     ):
         super(A2C, self).__init__()
         self.env = env
@@ -183,10 +182,13 @@ class A2C(nn.Module):
         self.hidden_size = input_size
         self.device = device
 
-        self.D = D
-        self.T = T
+        self.D = 1
+        if estimate_bpr:
+            self.T = 1
+        else:
+            self.T = 0
 
-        self.actor = GNNActor(self.input_size, self.hidden_size, D, T)
+        self.actor = GNNActor(self.input_size, self.hidden_size, self.D, self.T)
         self.critic = GNNCritic(self.input_size, self.hidden_size)
         self.obs_parser = GNNParser(self.env)
 
@@ -224,13 +226,16 @@ class A2C(nn.Module):
         return state
 
     def select_action(self, obs):
-        concentration, value = self.forward(obs)
+        concentration, taylor_params, value = self.forward(obs)
 
         m = Dirichlet(concentration)
 
         action = m.sample()
         self.saved_actions.append(SavedAction(m.log_prob(action), value))
-        return list(action.cpu().numpy())
+        if taylor_params is None:
+            return list(action.cpu().numpy())
+        else:
+            return list(action.cpu().numpy()), list(taylor_params.cpu().numpy())
 
     def training_step(self):
         R = 0

@@ -298,7 +298,7 @@ class AMoDEnv:
         # iod_path_dict: Formulated to be used in pax_step and LTM. iod_path_dict[path_id] = (path, cost)
         return pax_action, iod_path_dict
 
-    def pax_step(self, paxAction=None, CPLEXPATH=None, PATH="", platform="win"):
+    def pax_step(self, paxAction=None, CPLEXPATH=None, PATH="", platform="win", taylor_params=None):
         t = self.time
         delta_t = self.time_step
         # Do a step in passenger matching
