@@ -72,7 +72,7 @@ parser.add_argument(
     help="number of steps per episode (default: T=60)",
 )
 parser.add_argument("--no-cuda", type=bool, default=True, help="disables CUDA training")
-parser.add_argument("--estimate-bpr", type=bool, default=False, help="estimate BPR")
+parser.add_argument("--estimate-bpr", type=bool, default=True, help="estimate BPR")
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
