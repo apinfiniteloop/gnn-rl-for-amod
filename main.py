@@ -111,6 +111,9 @@ if not args.test:
         if args.estimate_bpr:
             taylor_params = None
         for step in range(T):
+            env.update_traffic_flow_and_travel_time(time=step)
+            if args.estimate_bpr:
+                env.eval_network_gen_cost(time=step, taylor_params=taylor_params)
             # take matching step (Step 1 in paper)
             obs, paxreward, done, info = env.pax_step(
                 CPLEXPATH=args.cplexpath,

@@ -104,7 +104,7 @@ class AMoDEnv:
         self.link_traffic_flow = {
             tuple(edge): {t: 0 for t in range(self.total_time)}
             for edge in self.network.edges
-        }
+        } # self.link_traffic_flow[edge][t] <-> traffic flow on edge at time t
         # Misc variables
         self.beta = beta * scenario.time_step
         self.info = dict.fromkeys(
@@ -148,8 +148,9 @@ class AMoDEnv:
                 edge_attrib["q_max"] * delta_t,
             )
     
-    def eval_network_gen_cost(self, time):
-
+    def eval_network_gen_cost(self, time, coeffs):
+        for edge in self.network.edges(keys=True):
+            self.gen_cost[edge][time] = self.approximate_gen_cost_function(current_traffic_flow=self.link_traffic_flow[edge][time], avg_traffic_flow=np.average(self.link_traffic_flow[edge][:time-1]), coeffs=coeffs)
 
     def approximate_gen_cost_function(self, current_traffic_flow, avg_traffic_flow, coeffs):
         approximation = coeffs[0]
@@ -160,6 +161,11 @@ class AMoDEnv:
             approximation += term
         
         return approximation
+
+    def update_traffic_flow_and_travel_time(self, time):
+        for edge in self.network.edges(keys=True):
+            self.link_traffic_flow[edge][time] = self.get_link_traffic_flow(edge, time)
+            self.link_mean_travel_time[edge][time] = self.get_link_mean_travel_time(edge)
 
     def generate_path_ids(
         self, network, pax_demand, time, gen_cost, acc, origins, destinations
@@ -465,7 +471,7 @@ class AMoDEnv:
                         #     self.path_demands[i][t + delta_t]
                         #     for i in self.path_demands.keys()
                         # ]
-                        self.path_demands[path][t+delta_t] for path in self.path_demands.keys() if path[0][0] == out_node else 0
+                        [self.path_demands[path][t+delta_t] for path in self.path_demands.keys() if path[0][0] == out_node else 0]
                     ),
                     self.receiving_flow[tuple(out_edges)[0]][t],
                 )
