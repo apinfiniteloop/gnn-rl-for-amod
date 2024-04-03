@@ -2,6 +2,7 @@ import os
 import subprocess
 import json
 import random
+import math
 from copy import deepcopy
 from itertools import product
 from collections import defaultdict
@@ -146,6 +147,19 @@ class AMoDEnv:
                 - self.cvn[tuple(edge)][t][0],
                 edge_attrib["q_max"] * delta_t,
             )
+    
+    def eval_network_gen_cost(self, time):
+        
+
+    def approximate_gen_cost_function(self, current_traffic_flow, avg_traffic_flow, coeffs):
+        approximation = coeffs[0]
+    
+        # Add the rest of the Taylor series terms
+        for i in range(1, len(coeffs)):
+            term = coeffs[i] * (current_traffic_flow - avg_traffic_flow)**i / math.factorial(i)
+            approximation += term
+        
+        return approximation
 
     def generate_path_ids(
         self, network, pax_demand, time, gen_cost, acc, origins, destinations
@@ -584,6 +598,14 @@ class AMoDEnv:
                             self.cvn[in_edge][t][1] + transition_flow
                         )
         self.time += self.time_step
+
+    def get_link_mean_travel_time(self, edge):
+        inv_1 = np.interp(np.arange(self.cvn[edge][self.total_time-1][0]), [self.cvn[edge][t][0] for t in range(self.total_time)], np.arange(self.total_time))
+        inv_2 = np.interp(np.arange(self.cvn[edge][self.total_time-1][1]), [self.cvn[edge][t][1] for t in range(self.total_time)], np.arange(self.total_time))
+        return sum([inv_2[i]-inv_1[i] for i in range(len(inv_2))])/len(inv_2)
+
+    def get_link_traffic_flow(self, edge, time):
+        return self.cvn[edge][time][0]-self.cvn[edge][time][1]
 
 
 class Scenario:
