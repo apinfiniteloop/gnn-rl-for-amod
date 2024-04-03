@@ -372,7 +372,7 @@ class AMoDEnv:
             self.paxFlow[o, d][t + link_travel_time] = self.iod_path_demands[pid]
             self.info["operating_cost"] += (
                 link_travel_time * self.beta * self.iod_path_demands[pid]
-            )  # TODO: Need definition for self.demandTime
+            )
             self.acc[i][t + 1] -= self.iod_path_demands[pid]
             self.info["served_demand"] += self.servedDemand[pid][t]
             self.dacc[d][t + link_travel_time] += self.paxFlow[pid][

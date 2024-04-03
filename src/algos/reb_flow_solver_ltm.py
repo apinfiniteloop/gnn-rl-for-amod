@@ -28,7 +28,7 @@ def solveRebFlow(env, res_path, desiredAcc, gen_cost, CPLEXPATH):
         file.write("edgeAttr=" + mat2str(edgeAttr) + ";\r\n")
         file.write("accInitTuple=" + mat2str(accTuple) + ";\r\n")
         file.write("accRLTuple=" + mat2str(accRLTuple) + ";\r\n")
-    modfile = modPath + "minRebDistRebOnly.mod"
+    modfile = modPath + "minRebDistRebOnly_path.mod"
     if CPLEXPATH is None:
         CPLEXPATH = "/opt/ibm/ILOG/CPLEX_Studio128/opl/bin/x86-64_linux/"
     my_env = os.environ.copy()
