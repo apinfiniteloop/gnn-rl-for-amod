@@ -104,7 +104,7 @@ class AMoDEnv:
         self.link_traffic_flow = {
             tuple(edge): {t: 0 for t in range(self.total_time)}
             for edge in self.network.edges
-        } # self.link_traffic_flow[edge][t] <-> traffic flow on edge at time t
+        }  # self.link_traffic_flow[edge][t] <-> traffic flow on edge at time t
         # Misc variables
         self.beta = beta * scenario.time_step
         self.info = dict.fromkeys(
@@ -147,25 +147,37 @@ class AMoDEnv:
                 - self.cvn[tuple(edge)][t][0],
                 edge_attrib["q_max"] * delta_t,
             )
-    
+
     def eval_network_gen_cost(self, time, coeffs):
         for edge in self.network.edges(keys=True):
-            self.gen_cost[edge][time] = self.approximate_gen_cost_function(current_traffic_flow=self.link_traffic_flow[edge][time], avg_traffic_flow=np.average(self.link_traffic_flow[edge][:time-1]), coeffs=coeffs)
+            self.gen_cost[edge][time] = self.approximate_gen_cost_function(
+                current_traffic_flow=self.link_traffic_flow[edge][time],
+                avg_traffic_flow=np.average(self.link_traffic_flow[edge][: time - 1]),
+                coeffs=coeffs,
+            )
 
-    def approximate_gen_cost_function(self, current_traffic_flow, avg_traffic_flow, coeffs):
+    def approximate_gen_cost_function(
+        self, current_traffic_flow, avg_traffic_flow, coeffs
+    ):
         approximation = coeffs[0]
-    
+
         # Add the rest of the Taylor series terms
         for i in range(1, len(coeffs)):
-            term = coeffs[i] * (current_traffic_flow - avg_traffic_flow)**i / math.factorial(i)
+            term = (
+                coeffs[i]
+                * (current_traffic_flow - avg_traffic_flow) ** i
+                / math.factorial(i)
+            )
             approximation += term
-        
+
         return approximation
 
     def update_traffic_flow_and_travel_time(self, time):
         for edge in self.network.edges(keys=True):
             self.link_traffic_flow[edge][time] = self.get_link_traffic_flow(edge, time)
-            self.link_mean_travel_time[edge][time] = self.get_link_mean_travel_time(edge)
+            self.link_mean_travel_time[edge][time] = self.get_link_mean_travel_time(
+                edge
+            )
 
     def generate_path_ids(
         self, network, pax_demand, time, gen_cost, acc, origins, destinations
@@ -318,7 +330,14 @@ class AMoDEnv:
         # iod_path_dict: Formulated to be used in pax_step and LTM. iod_path_dict[path_id] = (path, cost)
         return pax_action, iod_path_dict
 
-    def pax_step(self, paxAction=None, CPLEXPATH=None, PATH="", platform="win", taylor_params=None):
+    def pax_step(
+        self,
+        paxAction=None,
+        CPLEXPATH=None,
+        PATH="",
+        platform="win",
+        taylor_params=None,
+    ):
         t = self.time
         delta_t = self.time_step
         # Do a step in passenger matching
@@ -350,11 +369,13 @@ class AMoDEnv:
                 for edge in self.network.edges(keys=True)
             }
         for pid, flow in iod_path_demands.items():
-            self.path_demands[paxPathDict[pid][0]][t+delta_t] += flow
+            self.path_demands[paxPathDict[pid][0]][t + delta_t] += flow
             link_travel_time = 0
             for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
                 self.link_demands[(edge_start, edge_end, edge_key)][t] += flow
-                link_travel_time += self.link_mean_travel_time[(edge_start, edge_end, edge_key)][t]
+                link_travel_time += self.link_mean_travel_time[
+                    (edge_start, edge_end, edge_key)
+                ][t]
                 # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
                 if edge_start == paxPathDict[pid][0][0][0]:
                     for edge in self.network.in_edges(edge_start, keys=True):
@@ -441,7 +462,7 @@ class AMoDEnv:
                 ][
                     t
                 ]  # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
-        
+
         self.time += 1
         self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
         done = self.time == self.total_time
@@ -467,11 +488,14 @@ class AMoDEnv:
                 out_node = tuple(out_edges)[0][1]
                 transition_flow = min(
                     sum(
-                        # [
-                        #     self.path_demands[i][t + delta_t]
-                        #     for i in self.path_demands.keys()
-                        # ]
-                        [self.path_demands[path][t+delta_t] for path in self.path_demands.keys() if path[0][0] == out_node else 0]
+                        [
+                            (
+                                self.path_demands[path][t + delta_t]
+                                if path[0][0] == out_node
+                                else 0
+                            )
+                            for path in self.path_demands.keys()
+                        ]
                     ),
                     self.receiving_flow[tuple(out_edges)[0]][t],
                 )
@@ -608,12 +632,20 @@ class AMoDEnv:
         self.time += self.time_step
 
     def get_link_mean_travel_time(self, edge):
-        inv_1 = np.interp(np.arange(self.cvn[edge][self.total_time-1][0]), [self.cvn[edge][t][0] for t in range(self.total_time)], np.arange(self.total_time))
-        inv_2 = np.interp(np.arange(self.cvn[edge][self.total_time-1][1]), [self.cvn[edge][t][1] for t in range(self.total_time)], np.arange(self.total_time))
-        return sum([inv_2[i]-inv_1[i] for i in range(len(inv_2))])/len(inv_2)
+        inv_1 = np.interp(
+            np.arange(self.cvn[edge][self.total_time - 1][0]),
+            [self.cvn[edge][t][0] for t in range(self.total_time)],
+            np.arange(self.total_time),
+        )
+        inv_2 = np.interp(
+            np.arange(self.cvn[edge][self.total_time - 1][1]),
+            [self.cvn[edge][t][1] for t in range(self.total_time)],
+            np.arange(self.total_time),
+        )
+        return sum([inv_2[i] - inv_1[i] for i in range(len(inv_2))]) / len(inv_2)
 
     def get_link_traffic_flow(self, edge, time):
-        return self.cvn[edge][time][0]-self.cvn[edge][time][1]
+        return self.cvn[edge][time][0] - self.cvn[edge][time][1]
 
 
 class Scenario:
@@ -660,14 +692,14 @@ class Scenario:
         self.time_step = time_step
         if json_file is None or use_sample_network:
             self.is_json = False
-            self.G = self._load_sample_network()
+            self.G, self.pax_demand = self._load_sample_network()
             # (
             #     self.path_demands,
             #     self.link_demands,
             # ), self.all_paths = self._generate_random_demand(self.G, self.total_time, 2)
-            self.pax_demand = self._generate_random_demand(
-                self.G, self.total_time, self.time_step
-            )
+            # self.pax_demand = self._generate_random_demand(
+            #     self.G, self.total_time, self.time_step
+            # )
         else:
             # If Using json file. TODO: Need a json file to complete.
             raise NotImplementedError
@@ -678,13 +710,12 @@ class Scenario:
         self.origins = {}  # {time: [origins]}
         self.destinations = {}  # {time: [destinations]}
 
-    def _load_sample_network(self, name):
+    def _load_sample_network(self, name, demand_scale=(0, 5), price_scale=(10, 30)):
         """
         Loads sample network.
         """
-        if name == 'sample':
-            G = nx.MultiDiGraph()
-
+        G = nx.MultiDiGraph()
+        if name == "sample":
             # G.add_node("Or")
             G.add_node("A")
             G.add_node("B")
@@ -697,13 +728,117 @@ class Scenario:
             G.add_edge("B", "C", length=10, q_max=50, k_j=300, w=0.1, type="normal")
             G.add_edge("C", "D", length=10, q_max=50, k_j=60, w=0.1, type="normal")
             G.add_edge("C", "D", length=10, q_max=50, k_j=30, w=0.1, type="normal")
-            # G.add_edge(
-            #     "D", "De", length=0, q_max=np.inf, k_j=np.inf, w=1e-6, type="destination"
-            # )
-        elif name == 'sioux_falls':
-            raise NotImplementedError
+            self.origins.append("A")
+            self.destinations.append("D")
+            G = self._generate_dummy_od_links(G, self.origins, self.destinations)
 
+            pax_demand = {
+                time_step: {
+                    (
+                        origin,
+                        destination,
+                    ): (
+                        random.randint(demand_scale[0], demand_scale[1]),
+                        random.randint(price_scale[0], price_scale[1]),
+                    )
+                    for origin, destination in product(self.origins, self.destinations)
+                }
+                for time_step in range(self.total_time)
+            }
+        elif name == "sioux_falls":
+            file_path_network = "SiouxFalls_net.tntp"
+            file_path_trips = "SiouxFalls_trips.tntp"
+
+            self.pax_demand = self._initialize_pax_demand()
+
+            edges = self._read_network_sioux_falls(file_path_network)
+            G = self._create_multidigraph(edges)
+            base_demand = self._read_demand_sioux_falls(file_path_trips)
+            self._distribute_temporal_demand(base_demand)
+        else:
+            raise ValueError(f"Unsupported network name: {name}")
+
+        return G, pax_demand
+
+    def _initialize_pax_demand(self):
+        # Initialize the passenger demand dictionary for each time step
+        return {time: {} for time in range(60)}
+
+    def _read_network_sioux_falls(self, file_path):
+        with open(file_path, "r") as file:
+            lines = file.readlines()
+
+        start_index = 0
+        for i, line in enumerate(lines):
+            if "<END OF METADATA>" in line:
+                start_index = i + 1
+                break
+
+        edges = []
+        for line in lines[start_index:]:
+            if line.strip():
+                parts = line.split()
+                edge_data = {
+                    "init_node": int(parts[0]),
+                    "term_node": int(parts[1]),
+                    "capacity": float(parts[2]),
+                    "length": float(parts[3]),
+                    "free_flow_time": float(parts[4]),
+                    "b": float(parts[5]),
+                    "power": float(parts[6]),
+                    "speed": float(parts[7]),
+                    "toll": float(parts[8]),
+                    "link_type": int(parts[9]),
+                    "ffs": float(parts[7]),
+                }
+                edges.append(edge_data)
+        return edges
+
+    def _create_multidigraph(self, edges):
+        G = nx.MultiDiGraph()
+        for edge in edges:
+            G.add_edge(edge["init_node"], edge["term_node"], **edge)
         return G
+
+    def _read_demand_sioux_falls(self, file_path):
+        with open(file_path, "r") as file:
+            lines = file.readlines()
+
+        demand = {}
+        origin = None
+        for line in lines:
+            if line.startswith("Origin"):
+                parts = line.split()
+                origin = int(parts[1])
+                demand[origin] = {}
+            elif origin is not None:
+                parts = line.strip().split(";")
+                for part in parts:
+                    if ":" in part:
+                        dest, flow = part.split(":")
+                        demand[origin][int(dest.strip())] = float(flow.strip())
+        return demand
+
+    def _distribute_temporal_demand(self, base_demand):
+        total_demand = sum(sum(d.values()) for d in base_demand.values())
+        time_periods = range(60)  # Time steps from 0 to 59
+        for time in time_periods:
+            # Example temporal distribution, adjust as needed
+            time_factor = self._temporal_distribution_factor(
+                time, peak_time=30, std_dev=10
+            )
+            for origin, destinations in base_demand.items():
+                for destination, od_demand in destinations.items():
+                    adjusted_demand = od_demand * time_factor
+                    price = random.randint(self.price_scale[0], self.price_scale[1])
+                    self.pax_demand[time][(origin, destination)] = (
+                        adjusted_demand,
+                        price,
+                    )
+
+    def _temporal_distribution_factor(self, time, peak_time, std_dev):
+        # Example using a simple normal distribution for temporal variation
+        return np.exp(-0.5 * ((time - peak_time) / std_dev) ** 2)
 
     def _generate_dummy_od_links(
         self,
@@ -737,73 +872,8 @@ class Scenario:
                 w=dummy_w,
                 type="destination",
             )
-
-    def _generate_random_demand(
-        self,
-        network,
-        total_time,
-        time_step,
-        demand_scale: tuple = (0, 5),
-        price_scale: tuple = (10, 30),
-    ):
-        if not self.is_json:
-            self.origins.append("A")
-            self.destinations.append("D")
-            self._generate_dummy_od_links(network, self.origins, self.destinations)
-
-        self.pax_demand = {
-            time_step: {
-                (
-                    origin,
-                    destination,
-                ): (
-                    random.randint(demand_scale[0], demand_scale[1]),
-                    random.randint(price_scale[0], price_scale[1]),
-                )
-                for origin, destination in product(self.origins, self.destinations)
-            }
-            for time_step in range(self.total_time)
-        }
+        return network
 
     def _generate_original_acc(self, network, acc_scale: tuple = (0, 5)):
         for node in network.nodes:
             node["accInit"] = random.randint(acc_scale[0], acc_scale[1])
-
-        # if not self.is_json:
-        #     self.origins.append("A")
-        #     self.destinations.append("D")
-        # all_paths = list(
-        #     [
-        #         nx.all_simple_edge_paths(network, source=o, target=self.destinations)
-        #         for o in self.origins
-        #     ]
-        # )
-
-        # path_demands = {
-        #     path_id: [
-        #         random.randint(demand_scale[0], demand_scale[1])
-        #         for _ in range(total_time // time_step)
-        #     ]
-        #     for path_id, _ in enumerate(all_paths)
-        # }
-        # # Obtain link demands from path demands
-        # link_demands = {
-        #     edge: {time: 0 for time in range(total_time // time_step)}
-        #     for edge in network.edges(keys=True)
-        # }
-        # for path_id, demand_values in path_demands.items():
-        #     for time, demand in enumerate(demand_values):
-        #         for edge_start, edge_end, edge_key in all_paths[path_id]:
-        #             link_demands[(edge_start, edge_end, edge_key)][time] += demand
-        #             # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
-        #             if edge_start == all_paths[path_id][0][0]:
-        #                 for edge in network.in_edges(edge_start, keys=True):
-        #                     if network.edges[edge]["type"] == "origin":
-        #                         link_demands[edge][time] += demand
-        #             # Same for edge_end
-        #             if edge_end == all_paths[path_id][-1][1]:
-        #                 for edge in network.out_edges(edge_end, keys=True):
-        #                     if network.edges[edge]["type"] == "destination":
-        #                         link_demands[edge][time] += demand
-
-        # return (path_demands, link_demands), all_paths
