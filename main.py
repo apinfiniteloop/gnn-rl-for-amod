@@ -1,6 +1,7 @@
 from __future__ import print_function
 import argparse
-import tqdm
+
+# import tqdm
 from tqdm import trange
 import numpy as np
 import torch
@@ -122,7 +123,7 @@ if not args.test:
             )
             episode_reward += paxreward
             # use GNN-RL policy (Step 2 in paper)
-            if args.estimate_bpr == False:
+            if not args.estimate_bpr:
                 action_rl = model.select_action(obs)
             else:
                 action_rl, taylor_params = model.select_action(obs)

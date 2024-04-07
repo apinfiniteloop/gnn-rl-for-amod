@@ -6,7 +6,7 @@ import math
 from copy import deepcopy
 from itertools import product
 from collections import defaultdict
-from src.misc.utils import EdgeKeyDict, mat2str
+from src.misc.utils import EdgeKeyDict  # , mat2str
 import networkx as nx
 import numpy as np
 
@@ -768,7 +768,7 @@ class Scenario:
         # Initialize the passenger demand dictionary for each time step
         return {time: {} for time in range(60)}
 
-    def _read_network_sioux_falls(self, file_path):
+    def _read_network_sioux_falls(self, file_path, backward_speed=15):
         with open(file_path, "r") as file:
             lines = file.readlines()
 
@@ -790,10 +790,13 @@ class Scenario:
                     "free_flow_time": float(parts[4]),
                     "b": float(parts[5]),
                     "power": float(parts[6]),
-                    "speed": float(parts[7]),
+                    "speed_limit": float(parts[7]),
                     "toll": float(parts[8]),
                     "link_type": int(parts[9]),
-                    "ffs": float(parts[7]),
+                    "ffs": float(parts[3])/float(parts[7]), # free flow speed, in km/h
+                    "q_max": float(parts[2]), # capacity (flow)
+                    "w": backward_speed, # backward speed, here is is arbitrary
+                    "k_j": float(parts[2]) / (float(parts[3]) / float(parts[7])) + float(parts[2]) / backward_speed # jam density
                 }
                 edges.append(edge_data)
         return edges
@@ -824,7 +827,7 @@ class Scenario:
         return demand
 
     def _distribute_temporal_demand(self, base_demand, price_scale):
-        total_demand = sum(sum(d.values()) for d in base_demand.values())
+        # total_demand = sum(sum(d.values()) for d in base_demand.values())
         time_periods = range(60)  # Time steps from 0 to 59
         pax_demand = {time: {} for time in time_periods}
         for time in time_periods:
