@@ -656,6 +656,7 @@ class Scenario:
     def __init__(
         self,
         use_sample_network=True,
+        sample_network_name="sioux_falls",
         seed=None,
         total_time=60,
         time_step=1,
@@ -671,6 +672,8 @@ class Scenario:
         Parameters:
 
         `use_sample_network`: bool, whether to use the sample network or not
+
+        `sample_network_name`: str, name of the sample network
 
         `seed`: int, seed for random number generator
 
@@ -690,9 +693,9 @@ class Scenario:
             random.seed(self.seed)
         self.total_time = total_time
         self.time_step = time_step
-        if json_file is None or use_sample_network:
+        if use_sample_network:
             self.is_json = False
-            self.G, self.pax_demand = self._load_sample_network()
+            self.G, self.pax_demand = self._load_sample_network(sample_network_name)
             # (
             #     self.path_demands,
             #     self.link_demands,
@@ -707,8 +710,8 @@ class Scenario:
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
         self.ffs = ffs
-        self.origins = {}  # {time: [origins]}
-        self.destinations = {}  # {time: [destinations]}
+        self.origins = []  # {time: [origins]}
+        self.destinations = []  # {time: [destinations]}
 
     def _load_sample_network(self, name, demand_scale=(0, 5), price_scale=(10, 30)):
         """
@@ -746,15 +749,15 @@ class Scenario:
                 for time_step in range(self.total_time)
             }
         elif name == "sioux_falls":
-            file_path_network = "SiouxFalls_net.tntp"
-            file_path_trips = "SiouxFalls_trips.tntp"
+            file_path_network = "TransportationNetworks\SiouxFalls\SiouxFalls_net.tntp"
+            file_path_trips = "TransportationNetworks\SiouxFalls\SiouxFalls_trips.tntp"
 
-            self.pax_demand = self._initialize_pax_demand()
+            pax_demand = self._initialize_pax_demand()
 
             edges = self._read_network_sioux_falls(file_path_network)
             G = self._create_multidigraph(edges)
             base_demand = self._read_demand_sioux_falls(file_path_trips)
-            self._distribute_temporal_demand(base_demand)
+            pax_demand = self._distribute_temporal_demand(base_demand, price_scale)
         else:
             raise ValueError(f"Unsupported network name: {name}")
 
@@ -770,7 +773,7 @@ class Scenario:
 
         start_index = 0
         for i, line in enumerate(lines):
-            if "<END OF METADATA>" in line:
+            if "init_node" in line:
                 start_index = i + 1
                 break
 
@@ -819,9 +822,10 @@ class Scenario:
                         demand[origin][int(dest.strip())] = float(flow.strip())
         return demand
 
-    def _distribute_temporal_demand(self, base_demand):
+    def _distribute_temporal_demand(self, base_demand, price_scale):
         total_demand = sum(sum(d.values()) for d in base_demand.values())
         time_periods = range(60)  # Time steps from 0 to 59
+        pax_demand = {time: {} for time in time_periods}
         for time in time_periods:
             # Example temporal distribution, adjust as needed
             time_factor = self._temporal_distribution_factor(
@@ -830,11 +834,12 @@ class Scenario:
             for origin, destinations in base_demand.items():
                 for destination, od_demand in destinations.items():
                     adjusted_demand = od_demand * time_factor
-                    price = random.randint(self.price_scale[0], self.price_scale[1])
-                    self.pax_demand[time][(origin, destination)] = (
+                    price = random.randint(price_scale[0], price_scale[1])
+                    pax_demand[time][(origin, destination)] = (
                         adjusted_demand,
                         price,
                     )
+        return pax_demand
 
     def _temporal_distribution_factor(self, time, peak_time, std_dev):
         # Example using a simple normal distribution for temporal variation
