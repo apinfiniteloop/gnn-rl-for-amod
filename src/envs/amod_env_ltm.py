@@ -30,16 +30,19 @@ class AMoDEnv:
         self.time_step = scenario.time_step
 
         # Demand related variables
-        self.paths = scenario.all_paths
+        # self.paths = scenario.all_paths
         self.origins = scenario.origins
         self.destinations = scenario.destinations
+        self.od_pairs = scenario.od_pairs
         self.pax_demand = (
             scenario.pax_demand
         )  # {(origin, destination): (demand, price)}
-        self.path_demands = scenario.path_demands
-        self.link_demands = scenario.link_demands
+        # self.path_demands = scenario.path_demands
+        # self.link_demands = scenario.link_demands
+        self.path_demands = defaultdict(dict)
+        self.link_demands = defaultdict(dict)
         self.served_demand = defaultdict(dict)
-        for o, d in self.pax_demand.keys():
+        for o, d in self.od_pairs:
             self.served_demand[o, d] = defaultdict(float)
 
         # Vehicle count related variables
@@ -49,16 +52,11 @@ class AMoDEnv:
         self.dacc = defaultdict(
             dict
         )  # number of vehicles arriving at each node, dacc[t][i] <-> number of vehicles arriving at node i at time t
-        self.sch = {
-            t: {
-                i: {(o, d): None for o, d in product(self.network.nodes)}
-                for i in self.network.nodes
-            }
-            for t in range(self.total_time)
-        }  # Vehicle schedule. sch[t][i][(o,d)] <-> At time t, the amount of vehicles at node i, about to go from o to d.
         for node in self.network.nodes:
-            self.acc[0][node] = self.network.nodes[node]["accInit"]
-            self.dacc[0][node] = defaultdict(float)
+            self.acc[node][0] = self.network.nodes[node][
+                "accInit"
+            ]  # TODO: No accInit in Sioux Falls network. Random generation?
+            self.dacc[node][0] = defaultdict(float)
 
         # LTM related variables
         self.cvn = defaultdict(EdgeKeyDict)  # Cumulative Vehicle Number
@@ -342,7 +340,7 @@ class AMoDEnv:
         delta_t = self.time_step
         # Do a step in passenger matching
         for i in self.network.nodes:
-            self.acc[t + 1][i] = self.acc[t][i]
+            self.acc[i][t + 1] = self.acc[i][t]
         self.info["served_demand"] = 0  # initialize served demand
         self.info["operating_cost"] = 0  # initialize operating cost
         self.info["revenue"] = 0
@@ -464,7 +462,7 @@ class AMoDEnv:
                     t
                 ]  # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
 
-        self.time += 1
+        # self.time += 1
         self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
         done = self.time == self.total_time
         return self.obs, self.reward, done, self.info
@@ -658,7 +656,7 @@ class Scenario:
         self,
         use_sample_network=True,
         sample_network_name="sioux_falls",
-        seed=None,
+        sd=None,
         total_time=60,
         time_step=1,
         json_file=None,
@@ -688,15 +686,17 @@ class Scenario:
 
         `ffs`: float, free flow speed of network
         """
-        self.seed = seed
-        if seed is not None:
+        self.seed = sd
+        if sd is not None:
             np.random.seed(self.seed)
             random.seed(self.seed)
         self.total_time = total_time
         self.time_step = time_step
         if use_sample_network:
             self.is_json = False
-            self.G, self.pax_demand = self._load_sample_network(sample_network_name)
+            self.G, self.pax_demand, self.origins, self.destinations, self.od_pairs = (
+                self._load_sample_network(sample_network_name)
+            )
             # (
             #     self.path_demands,
             #     self.link_demands,
@@ -711,8 +711,9 @@ class Scenario:
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
         self.ffs = ffs
-        self.origins = []  # {time: [origins]}
-        self.destinations = []  # {time: [destinations]}
+        # self.origins = set()
+        # self.destinations = set()
+        # self.od_pairs = set()
 
     def _load_sample_network(self, name, demand_scale=(0, 5), price_scale=(10, 30)):
         """
@@ -720,6 +721,9 @@ class Scenario:
         """
         G = nx.MultiDiGraph()
         if name == "sample":
+            origins = set()
+            destinations = set()
+            od_pairs = set()
             # G.add_node("Or")
             G.add_node("A")
             G.add_node("B")
@@ -732,8 +736,9 @@ class Scenario:
             G.add_edge("B", "C", length=10, q_max=50, k_j=300, w=0.1, type="normal")
             G.add_edge("C", "D", length=10, q_max=50, k_j=60, w=0.1, type="normal")
             G.add_edge("C", "D", length=10, q_max=50, k_j=30, w=0.1, type="normal")
-            self.origins.append("A")
-            self.destinations.append("D")
+            origins.add("A")
+            destinations.add("D")
+            od_pairs.add(("A", "D"))
             G = self._generate_dummy_od_links(G, self.origins, self.destinations)
 
             pax_demand = {
@@ -757,12 +762,14 @@ class Scenario:
 
             edges = self._read_network_sioux_falls(file_path_network)
             G = self._create_multidigraph(edges)
-            base_demand = self._read_demand_sioux_falls(file_path_trips)
+            base_demand, origins, destinations, od_pairs = (
+                self._read_demand_sioux_falls(file_path_trips)
+            )
             pax_demand = self._distribute_temporal_demand(base_demand, price_scale)
         else:
             raise ValueError(f"Unsupported network name: {name}")
 
-        return G, pax_demand
+        return G, pax_demand, origins, destinations, od_pairs
 
     def _initialize_pax_demand(self):
         # Initialize the passenger demand dictionary for each time step
@@ -811,6 +818,9 @@ class Scenario:
         return G
 
     def _read_demand_sioux_falls(self, file_path):
+        origins = set()
+        destinations = set()
+        od_pairs = set()
         with open(file_path, "r") as file:
             lines = file.readlines()
 
@@ -820,14 +830,18 @@ class Scenario:
             if line.startswith("Origin"):
                 parts = line.split()
                 origin = int(parts[1])
+                origins.add(origin)
                 demand[origin] = {}
             elif origin is not None:
                 parts = line.strip().split(";")
                 for part in parts:
                     if ":" in part:
                         dest, flow = part.split(":")
+                        origins.add(origin)
+                        destinations.add(dest)
+                        od_pairs.add((origin, dest))
                         demand[origin][int(dest.strip())] = float(flow.strip())
-        return demand
+        return demand, origins, destinations, od_pairs
 
     def _distribute_temporal_demand(self, base_demand, price_scale):
         # total_demand = sum(sum(d.values()) for d in base_demand.values())

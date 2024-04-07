@@ -81,11 +81,13 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 # Define AMoD Simulator Environment
 scenario = Scenario(
-    json_file="data/scenario_nyc4x4.json",
+    # json_file="data/scenario_nyc4x4.json",
+    use_sample_network=True,
+    sample_network_name="sioux_falls",
     sd=args.seed,
-    demand_ratio=args.demand_ratio,
-    json_hr=args.json_hr,
-    json_tstep=args.json_tsetp,
+    # demand_ratio=args.demand_ratio,
+    # json_hr=args.json_hr,
+    # json_tstep=args.json_tsetp,
 )
 env = AMoD(scenario, beta=args.beta)
 # Initialize A2C-GNN
@@ -142,6 +144,7 @@ if not args.test:
             # track performance over episode
             episode_served_demand += info["served_demand"]
             episode_rebalancing_cost += info["rebalancing_cost"]
+            env.ltm_step()
             # stop episode if terminating conditions are met
             if done:
                 break
