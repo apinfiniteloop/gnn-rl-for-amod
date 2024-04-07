@@ -786,17 +786,20 @@ class Scenario:
                     "init_node": int(parts[0]),
                     "term_node": int(parts[1]),
                     "capacity": float(parts[2]),
-                    "length": float(parts[3]),
-                    "free_flow_time": float(parts[4]),
+                    "length": float(parts[3]),  # In km
+                    "free_flow_time": float(parts[4]),  # In minutes
                     "b": float(parts[5]),
                     "power": float(parts[6]),
                     "speed_limit": float(parts[7]),
                     "toll": float(parts[8]),
                     "link_type": int(parts[9]),
-                    "ffs": float(parts[3])/float(parts[7]), # free flow speed, in km/h
-                    "q_max": float(parts[2]), # capacity (flow)
-                    "w": backward_speed, # backward speed, here is is arbitrary
-                    "k_j": float(parts[2]) / (float(parts[3]) / float(parts[7])) + float(parts[2]) / backward_speed # jam density
+                    "ffs": float(parts[3])
+                    / (float(parts[4]) / 60),  # free flow speed, in km/h
+                    "q_max": float(parts[2]),  # capacity (flow)
+                    "w": backward_speed,  # backward speed, here is is arbitrary
+                    "k_j": float(parts[2]) / (float(parts[3]) / (float(parts[4]) / 60))
+                    + float(parts[2])
+                    / backward_speed,  # jam density (calculated thru backward speed and TFD)
                 }
                 edges.append(edge_data)
         return edges
