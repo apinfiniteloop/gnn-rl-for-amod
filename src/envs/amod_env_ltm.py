@@ -312,7 +312,7 @@ class AMoDEnv:
         output_f.close()
         flow = defaultdict(float)
         # Retrieve and process the result file. TODO: Write it.
-        with open(resfile, "r", encoding="utf8") as file:
+        with open(res_file, "r", encoding="utf8") as file:
             for row in file:
                 item = row.replace("e)", ")").strip().strip(";").split("=")
                 if item[0] == "flow":
@@ -361,7 +361,8 @@ class AMoDEnv:
             pid: flow if flow > 1e-6 else 0
             for (_, _, _, pid), flow in paxAction.items()
         }
-        self.path_demands[paxPathDict[pid][0]][t] = iod_path_demands[pid]
+        for pid in iod_path_demands.keys():
+            self.path_demands[paxPathDict[pid][0]][t] = iod_path_demands[pid]
         # Obtain link demands from path demands
         if self.link_demands is None:
             self.link_demands = {
@@ -418,7 +419,7 @@ class AMoDEnv:
         for k, (edge_start, edge_end, edge_key) in enumerate(
             self.network.edges(keys=True, data=False)
         ):
-            self.rebAction[k] = min(self.acc[i][t + 1], rebAction[k])
+            self.rebAction[k] = min(self.acc[edge_start][t + 1], rebAction[k])
             self.rebFlow[edge_start, edge_end, edge_key][
                 t + self.rebTime[edge_start, edge_end, edge_key][t]
             ] = self.rebAction[k]
