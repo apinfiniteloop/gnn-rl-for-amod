@@ -4,9 +4,10 @@ import json
 import random
 import math
 from copy import deepcopy
-from itertools import product
+from itertools import product, islice
 from collections import defaultdict
 from src.misc.utils import EdgeKeyDict  # , mat2str
+from src.misc.caching import PathCacheManager
 import networkx as nx
 import numpy as np
 
@@ -20,7 +21,7 @@ class AMoDEnv:
         self.scenario = deepcopy(scenario)
         self.network = scenario.G
         self.gen_cost = defaultdict(
-            EdgeKeyDict
+            dict
         )  # Generalized cost, for every edge and time. gen_cost[i][t] <-> generalized cost of edge i at time t
 
         # Time related variables
@@ -110,6 +111,10 @@ class AMoDEnv:
         )
         self.reward = 0
 
+    def cache_paths(self):
+        cache = PathCacheManager(self.network)
+        cache.cache_paths(self.origins, self.destinations)
+
     def calculate_sending_flow(self, edge, edge_attrib, t):
         delta_t = self.time_step
         ffs = self.ffs
@@ -171,7 +176,7 @@ class AMoDEnv:
 
             return approximation
         else:
-            return 1 # TODO: What is the default value?
+            return 1  # TODO: What is the default value?
 
     def update_traffic_flow_and_travel_time(self, time):
         for edge in self.network.edges(keys=True):
@@ -181,18 +186,28 @@ class AMoDEnv:
             # )
 
     def generate_path_ids(
-        self, network, pax_demand, time, gen_cost, acc, origins, destinations
+        self,
+        network,
+        pax_demand,
+        time,
+        gen_cost,
+        acc,
+        origins,
+        destinations,
+        truncate=5,
     ):
         """
         Generate unique path IDs and their costs for IOD paths.
 
         Args:
-        - network: A NetworkX graph representing the network.
-        - time_period: The current time period for cost calculation.
-        - gen_cost: A dictionary holding the generalized cost of edges.
-        - acc: A dictionary holding vehicle accumulations.
-        - origins, destinations: Lists of origin and destination node IDs.
-        - intermediates: List of intermediate node IDs that each path must pass through.
+        - network: NetworkX graph object representing the road network.
+        - pax_demand: Dictionary of passenger demand at each time step.
+        - time: Current time step.
+        - gen_cost: Dictionary of generalized costs for each edge at each time step.
+        - acc: Dictionary of vehicle counts at each node at each time step.
+        - origins: List of origin nodes.
+        - destinations: List of destination nodes.
+        - truncate: Maximum number of paths to generate for each IOD pair.
 
         Returns:
         - iod_path_tuple: A list of tuples for IOD paths with path IDs and costs.
@@ -202,21 +217,26 @@ class AMoDEnv:
         path_id = 0
         iod_path_tuple = []
         iod_path_dict = {}  # iod_path_dict[(i,o,d)][path_id] = (path, cost)
-
+        cache = PathCacheManager(self.network)
+        cache.load_cache()
         # Generate IOD paths with unique IDs
         for i, o, d in product(self.acc.keys(), origins, destinations):
-            io_paths = nx.all_simple_paths(network, source=i, target=o)
-            od_paths = nx.all_simple_paths(network, source=o, target=d)
+            print(f"Retrieving paths for {i}, {o}, {d} from cache.")
+            # io_paths = islice(
+            #     nx.all_simple_edge_paths(network, source=i, target=o), truncate
+            # )
+            # od_paths = islice(
+            #     nx.all_simple_edge_paths(network, source=o, target=d), truncate
+            # )
+            io_paths = cache.get_cached_paths(i, o, d)[0]
+            od_paths = cache.get_cached_paths(o, d, i)[1]
 
             for io_path in io_paths:
                 for od_path in od_paths:
                     # Combine IO and OD paths, excluding the duplicate occurrence of 'o'
-                    combined_path = io_path + od_path[1:]
+                    combined_path = io_path + od_path
                     # Calculate the total cost of the combined path
-                    total_cost = sum(
-                        gen_cost[edge][time]
-                        for edge in zip(combined_path[:-1], combined_path[1:])
-                    )
+                    total_cost = sum([gen_cost[edge][time] for edge in combined_path])
                     # Update tuples and dictionaries with the new path and its cost
                     iod_path_tuple.append(
                         (
@@ -276,7 +296,13 @@ class AMoDEnv:
             (i, self.acc[i][t + 1]) for i in self.acc
         ]  # Accumulation attributes
         iod_path_tuple, iod_path_dict = self.generate_path_ids(
-            network=self.network, pax_demand=self.pax_demand, time=t, gen_cost=self.gen_cost, acc=self.acc, origins=self.origins, destinations=self.destinations
+            network=self.network,
+            pax_demand=self.pax_demand,
+            time=t,
+            gen_cost=self.gen_cost,
+            acc=self.acc,
+            origins=self.origins,
+            destinations=self.destinations,
         )
 
         mod_path = os.getcwd().replace("\\", "/") + "/src/cplex_mod/"

@@ -90,6 +90,8 @@ scenario = Scenario(
     # json_tstep=args.json_tsetp,
 )
 env = AMoD(scenario, beta=args.beta)
+# env.cache_paths()
+
 # Initialize A2C-GNN
 model = A2C(env=env, input_size=21, estimate_bpr=args.estimate_bpr).to(device)
 

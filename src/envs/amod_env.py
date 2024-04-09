@@ -326,7 +326,7 @@ class Scenario:
         json_regions=None,
     ):
         # trip_length_preference: positive - more shorter trips, negative - more longer trips
-        # grid_travel_time: travel time between grids TODO: Need to revise travel time. Consider using BPR.
+        # grid_travel_time: travel time between grids.
         # demand_input： list - total demand out of each region,
         #          float/int - total demand out of each region satisfies uniform distribution on [0, demand_input]
         #          dict/defaultdict - total demand between pairs of regions

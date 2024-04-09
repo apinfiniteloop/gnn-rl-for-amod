@@ -27,6 +27,19 @@
             "args": []
         },
         {
+            "name": "main.py",
+            "type": "python",
+            "request": "launch",
+            "program": "${cwd}/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${cwd}"
+            },
+            "args": []
+        },
+        {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
