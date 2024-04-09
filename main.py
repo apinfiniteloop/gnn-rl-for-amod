@@ -105,18 +105,18 @@ if not args.test:
     epochs = trange(train_episodes)  # epoch iterator
     best_reward = -np.inf  # set best reward
     model.train()  # set model in train mode
+    if args.estimate_bpr:
+        taylor_params = None
 
     for i_episode in epochs:
-        obs = env.reset()  # initialize environment
+        obs = env.reset(scenario=scenario)  # initialize environment
         episode_reward = 0
         episode_served_demand = 0
         episode_rebalancing_cost = 0
-        if args.estimate_bpr:
-            taylor_params = None
         for step in range(T):
             env.update_traffic_flow_and_travel_time(time=step)
             if args.estimate_bpr:
-                env.eval_network_gen_cost(time=step, taylor_params=taylor_params)
+                env.eval_network_gen_cost(time=step, coeffs=taylor_params)
             # take matching step (Step 1 in paper)
             obs, paxreward, done, info = env.pax_step(
                 CPLEXPATH=args.cplexpath,

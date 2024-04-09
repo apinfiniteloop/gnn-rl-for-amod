@@ -100,7 +100,7 @@ class AMoDEnv:
         }
         self.link_traffic_flow = defaultdict(EdgeKeyDict)
         self.link_traffic_flow = {
-            tuple(edge): {t: 0 for t in range(self.total_time)}
+            tuple(edge): [0 for t in range(self.total_time)]
             for edge in self.network.edges
         }  # self.link_traffic_flow[edge][t] <-> traffic flow on edge at time t
         # Misc variables
@@ -157,25 +157,28 @@ class AMoDEnv:
     def approximate_gen_cost_function(
         self, current_traffic_flow, avg_traffic_flow, coeffs
     ):
-        approximation = coeffs[0]
+        if coeffs is not None:
+            approximation = coeffs[0]
 
-        # Add the rest of the Taylor series terms
-        for i in range(1, len(coeffs)):
-            term = (
-                coeffs[i]
-                * (current_traffic_flow - avg_traffic_flow) ** i
-                / math.factorial(i)
-            )
-            approximation += term
+            # Add the rest of the Taylor series terms
+            for i in range(1, len(coeffs)):
+                term = (
+                    coeffs[i]
+                    * (current_traffic_flow - avg_traffic_flow) ** i
+                    / math.factorial(i)
+                )
+                approximation += term
 
-        return approximation
+            return approximation
+        else:
+            return 1 # TODO: What is the default value?
 
     def update_traffic_flow_and_travel_time(self, time):
         for edge in self.network.edges(keys=True):
             self.link_traffic_flow[edge][time] = self.get_link_traffic_flow(edge, time)
-            self.link_mean_travel_time[edge][time] = self.get_link_mean_travel_time(
-                edge
-            )
+            # self.link_mean_travel_time[edge][time] = self.get_link_mean_travel_time(
+            #     edge
+            # )
 
     def generate_path_ids(
         self, network, pax_demand, time, gen_cost, acc, origins, destinations
@@ -273,7 +276,7 @@ class AMoDEnv:
             (i, self.acc[i][t + 1]) for i in self.acc
         ]  # Accumulation attributes
         iod_path_tuple, iod_path_dict = self.generate_path_ids(
-            self.network, t, self.gen_cost, self.acc, self.origins, self.destinations
+            network=self.network, pax_demand=self.pax_demand, time=t, gen_cost=self.gen_cost, acc=self.acc, origins=self.origins, destinations=self.destinations
         )
 
         mod_path = os.getcwd().replace("\\", "/") + "/src/cplex_mod/"
@@ -630,6 +633,9 @@ class AMoDEnv:
                         )
         self.time += self.time_step
 
+    def reset(self, scenario):
+        self.__init__(scenario=scenario)
+
     def get_link_mean_travel_time(self, edge):
         inv_1 = np.interp(
             np.arange(self.cvn[edge][self.total_time - 1][0]),
@@ -762,6 +768,7 @@ class Scenario:
 
             edges = self._read_network_sioux_falls(file_path_network)
             G = self._create_multidigraph(edges)
+            G = self._generate_init_acc(G)
             base_demand, origins, destinations, od_pairs = (
                 self._read_demand_sioux_falls(file_path_trips)
             )
@@ -838,7 +845,7 @@ class Scenario:
                     if ":" in part:
                         dest, flow = part.split(":")
                         origins.add(origin)
-                        destinations.add(dest)
+                        destinations.add(int(dest.strip()))
                         od_pairs.add((origin, dest))
                         demand[origin][int(dest.strip())] = float(flow.strip())
         return demand, origins, destinations, od_pairs
@@ -865,6 +872,14 @@ class Scenario:
     def _temporal_distribution_factor(self, time, peak_time, std_dev):
         # Example using a simple normal distribution for temporal variation
         return np.exp(-0.5 * ((time - peak_time) / std_dev) ** 2)
+
+    def _generate_init_acc(self, network, acc_scale: tuple = (0, 100)):
+        accs = {
+            i: {"accInit": random.randint(acc_scale[0], acc_scale[1])}
+            for i in network.nodes
+        }
+        nx.set_node_attributes(network, accs)
+        return network
 
     def _generate_dummy_od_links(
         self,
@@ -899,7 +914,3 @@ class Scenario:
                 type="destination",
             )
         return network
-
-    def _generate_original_acc(self, network, acc_scale: tuple = (0, 5)):
-        for node in network.nodes:
-            node["accInit"] = random.randint(acc_scale[0], acc_scale[1])
