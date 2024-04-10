@@ -4,7 +4,7 @@ import json
 import random
 import math
 from copy import deepcopy
-from itertools import product, islice
+from itertools import product
 from collections import defaultdict
 from src.misc.utils import EdgeKeyDict  # , mat2str
 from src.misc.caching import PathCacheManager
@@ -238,19 +238,22 @@ class AMoDEnv:
                     # Calculate the total cost of the combined path
                     total_cost = sum([gen_cost[edge][time] for edge in combined_path])
                     # Update tuples and dictionaries with the new path and its cost
-                    iod_path_tuple.append(
-                        (
-                            i,  # Vehicle current location
-                            o,  # Trip origin
-                            d,  # Trip destination
-                            path_id,  # Unique Path ID
-                            total_cost,  # Total cost of the path (generalized)
-                            self.pax_demand[time][(o, d)][0],  # Demand
-                            self.pax_demand[time][(o, d)][1],
-                        )  # Price
-                        if time in self.pax_demand and (o, d) in self.pax_demand[time]
-                        else (i, o, d, path_id, total_cost, 0, 0)
-                    )
+                    if (
+                        time in self.pax_demand
+                        and (o, d) in self.pax_demand[time]
+                        and self.pax_demand[time][(o, d)] != 0
+                    ):
+                        iod_path_tuple.append(
+                            (
+                                i,  # Vehicle current location
+                                o,  # Trip origin
+                                d,  # Trip destination
+                                path_id,  # Unique Path ID
+                                total_cost,  # Total cost of the path (generalized)
+                                self.pax_demand[time][(o, d)][0],  # Demand
+                                self.pax_demand[time][(o, d)][1],  # Price
+                            )
+                        )
                     if (i, o, d) not in iod_path_dict:
                         iod_path_dict[(i, o, d)] = {}
                     iod_path_dict[path_id] = (combined_path, total_cost, (i, o, d))
@@ -261,9 +264,9 @@ class AMoDEnv:
     def format_for_opl(self, value):
         """Format Python data types into strings that OPL can parse."""
         if isinstance(value, list):
-            return "[" + " ".join(self.format_for_opl(v) for v in value) + "]"
+            return "{" + ", ".join(self.format_for_opl(v) for v in value) + "}"
         elif isinstance(value, tuple):
-            return "<" + ",".join(self.format_for_opl(v) for v in value) + ">"
+            return "<" + ", ".join(self.format_for_opl(v) for v in value) + ">"
         elif isinstance(value, dict):
             return (
                 "{"
@@ -317,13 +320,14 @@ class AMoDEnv:
         data_file = matching_path + "data_{}.dat".format(t)
         res_file = matching_path + "res_{}.dat".format(t)
         with open(data_file, "w", encoding="UTF-8") as f:
+            f.write('path="' + res_file + '";\r')
             # Writing demandAttr
-            f.write(f"demandAttr = {self.format_for_opl(demand_attr)};\n")
+            # f.write(f"demandAttr = {self.format_for_opl(demand_attr)};\n")
             # Writing accInitTuple
             f.write(f"accInitTuple = {self.format_for_opl(acc_tuple)};\n")
             # Writing iodPathTuple
             f.write(f"iodPathTuple = {self.format_for_opl(iod_path_tuple)};\n")
-        mod_file = mod_path + "matching.mod"
+        mod_file = mod_path + "matching_path.mod"
         if CPLEXPATH is None:
             CPLEXPATH = "C:/Program Files/ibm/ILOG/CPLEX_Studio1210/opl/bin/x64_win64/"
         my_env = os.environ.copy()
@@ -876,14 +880,16 @@ class Scenario:
                         demand[origin][int(dest.strip())] = float(flow.strip())
         return demand, origins, destinations, od_pairs
 
-    def _distribute_temporal_demand(self, base_demand, price_scale):
+    def _distribute_temporal_demand(
+        self, base_demand, price_scale, peak_time=30, std_dev=10, scale=0.1
+    ):
         # total_demand = sum(sum(d.values()) for d in base_demand.values())
         time_periods = range(60)  # Time steps from 0 to 59
         pax_demand = {time: {} for time in time_periods}
         for time in time_periods:
             # Example temporal distribution, adjust as needed
             time_factor = self._temporal_distribution_factor(
-                time, peak_time=30, std_dev=10
+                time, peak_time=peak_time, std_dev=std_dev
             )
             for origin, destinations in base_demand.items():
                 for destination, od_demand in destinations.items():

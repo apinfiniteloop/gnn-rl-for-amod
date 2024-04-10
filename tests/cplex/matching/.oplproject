@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="ASCII"?><project>
+    	
+    <version>1.0</version>
+    	
+    <configs>
+        		
+        <config default="true" name="matching_path" category="opl">
+            			
+            <ref name="data_0.dat" type="data">
+			</ref>
+            			
+            <ref name="matching_path.mod" type="model">
+			</ref>
+            		
+        </config>
+        		
+        <config default="false" name="matching" category="opl">
+            			
+            <ref name="matching.mod" type="model">
+			</ref>
+            			
+            <ref name="data_1.dat" type="data">
+			</ref>
+            		
+        </config>
+        	
+    </configs>
+    	
+
+</project>
