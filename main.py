@@ -8,7 +8,7 @@ import torch
 
 from src.envs.amod_env_ltm import Scenario, AMoDEnv as AMoD
 from src.algos.a2c_gnn import A2C
-from src.algos.reb_flow_solver import solveRebFlow
+from src.algos.reb_flow_solver_ltm import solveRebFlow
 from src.misc.utils import dictsum
 
 parser = argparse.ArgumentParser(description="A2C-GNN")

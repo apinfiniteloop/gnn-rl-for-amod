@@ -32,9 +32,12 @@ class AMoDEnv:
 
         # Demand related variables
         # self.paths = scenario.all_paths
+        self.region = [node for node in self.network.nodes if node[-1] != "*"]
+        self.nregion = len(self.region)
         self.origins = scenario.origins
         self.destinations = scenario.destinations
         self.od_pairs = scenario.od_pairs
+        self.price = scenario.price
         self.pax_demand = (
             scenario.pax_demand
         )  # {(origin, destination): (demand, price)}
@@ -770,6 +773,8 @@ class Scenario:
             random.seed(self.seed)
         self.total_time = total_time
         self.time_step = time_step
+        self.demand_input = defaultdict(dict)
+        self.price = defaultdict(dict)
         if use_sample_network:
             self.is_json = False
             self.G, self.pax_demand, self.origins, self.destinations, self.od_pairs = (
@@ -789,6 +794,7 @@ class Scenario:
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
         self.ffs = ffs
+
         # self.origins = set()
         # self.destinations = set()
         # self.od_pairs = set()
@@ -944,6 +950,8 @@ class Scenario:
                             adjusted_demand,
                             price,
                         )
+                        self.demand_input[origin, destination][time] = adjusted_demand
+                        self.price[origin, destination][time] = price
         return pax_demand
 
     def _temporal_distribution_factor(self, time, peak_time, std_dev):

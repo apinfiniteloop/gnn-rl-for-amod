@@ -20,6 +20,7 @@ from torch.distributions import Dirichlet
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
 from torch_geometric.nn import global_mean_pool, global_max_pool
+from torch_geometric.utils.convert import from_networkx
 from torch_geometric.utils import grid
 from collections import namedtuple
 
@@ -39,13 +40,24 @@ class GNNParser:
     Parser converting raw environment observations to agent inputs (s_t).
     """
 
-    def __init__(self, env, T=10, grid_h=4, grid_w=4, scale_factor=0.01):
+    def __init__(
+        self,
+        env,
+        use_grid=False,
+        T=10,
+        grid_h=4,
+        grid_w=4,
+        scale_factor=0.01,
+        network=None,
+    ):
         super().__init__()
         self.env = env
         self.T = T
         self.s = scale_factor
-        self.grid_h = grid_h
-        self.grid_w = grid_w
+        self.use_grid = use_grid
+        if self.use_grid:
+            self.grid_h = grid_h
+            self.grid_w = grid_w
 
     def parse_obs(self, obs):
         x = (
@@ -75,8 +87,16 @@ class GNNParser:
                             [
                                 sum(
                                     [
-                                        (self.env.scenario.demand_input[i, j][t])
-                                        * (self.env.price[i, j][t])
+                                        (
+                                            self.env.scenario.demand_input[i, j][t]
+                                            if t in self.env.scenario.demand_input[i, j]
+                                            else 0
+                                        )
+                                        * (
+                                            self.env.price[i, j][t]
+                                            if t in self.env.price[i, j]
+                                            else 0
+                                        )
                                         * self.s
                                         for j in self.env.region
                                     ]
@@ -97,7 +117,11 @@ class GNNParser:
             .view(21, self.env.nregion)
             .T
         )
-        edge_index, pos_coord = grid(height=self.grid_h, width=self.grid_w)
+        if self.use_grid:
+            edge_index, pos_coord = grid(height=self.grid_h, width=self.grid_w)
+        else:
+            pyg_graph = from_networkx(self.env.network)
+            edge_index = pyg_graph.edge_index
         data = Data(x, edge_index)
         return data
 
@@ -112,7 +136,7 @@ class GNNActor(nn.Module):
     `T` is the dimensions of the parameter space for the Taylor's series. Defaults to 0 (disabled). Change to 1 if considering the approximation of BPR.
     """
 
-    def __init__(self, in_channels, out_channels, D=1, T=0):
+    def __init__(self, in_channels, out_channels, D=1, T=3):
         super().__init__()
 
         self.conv1 = GCNConv(in_channels, in_channels)
