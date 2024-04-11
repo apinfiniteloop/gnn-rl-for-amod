@@ -20,6 +20,8 @@ class PathCacheManager:
         """
         path_cache = {}
         for i, o, d in product(self.network.nodes, origins, destinations):
+            if i[-1] == "*":
+                continue
             print(f"Caching paths for i={i}, o={o}, d={d}.")
             io_paths = list(
                 nx.all_simple_edge_paths(

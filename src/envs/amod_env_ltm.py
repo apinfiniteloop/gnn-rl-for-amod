@@ -40,11 +40,17 @@ class AMoDEnv:
         )  # {(origin, destination): (demand, price)}
         # self.path_demands = scenario.path_demands
         # self.link_demands = scenario.link_demands
-        self.path_demands = defaultdict(dict)
+        self.path_demands = defaultdict(lambda: defaultdict(int))
         self.link_demands = defaultdict(dict)
         self.served_demand = defaultdict(dict)
         for o, d in self.od_pairs:
             self.served_demand[o, d] = defaultdict(float)
+        self.pax_flow = defaultdict(dict)
+        for o, d in self.od_pairs:
+            self.pax_flow[o, d] = defaultdict(float)  # TODO: Or float? idk
+        self.reb_flow = defaultdict(dict)
+        for edge in self.network.edges(keys=True):
+            self.reb_flow[edge] = defaultdict(float)
 
         # Vehicle count related variables
         self.acc = defaultdict(
@@ -54,9 +60,11 @@ class AMoDEnv:
             dict
         )  # number of vehicles arriving at each node, dacc[t][i] <-> number of vehicles arriving at node i at time t
         for node in self.network.nodes:
+            if node[-1] == "*":
+                continue
             self.acc[node][0] = self.network.nodes[node][
                 "accInit"
-            ]  # TODO: No accInit in Sioux Falls network. Random generation?
+            ]  # TODO: No accInit in Sioux Falls network. Random generation instead.
             self.dacc[node][0] = defaultdict(float)
 
         # LTM related variables
@@ -221,15 +229,14 @@ class AMoDEnv:
         cache.load_cache()
         # Generate IOD paths with unique IDs
         for i, o, d in product(self.acc.keys(), origins, destinations):
-            print(f"Retrieving paths for {i}, {o}, {d} from cache.")
+            # print(f"Retrieving paths for {i}, {o}, {d} from cache.")
             # io_paths = islice(
             #     nx.all_simple_edge_paths(network, source=i, target=o), truncate
             # )
             # od_paths = islice(
             #     nx.all_simple_edge_paths(network, source=o, target=d), truncate
             # )
-            io_paths = cache.get_cached_paths(i, o, d)[0]
-            od_paths = cache.get_cached_paths(o, d, i)[1]
+            io_paths, od_paths = cache.get_cached_paths(i, o, d)
 
             for io_path in io_paths:
                 for od_path in od_paths:
@@ -256,7 +263,11 @@ class AMoDEnv:
                         )
                     if (i, o, d) not in iod_path_dict:
                         iod_path_dict[(i, o, d)] = {}
-                    iod_path_dict[path_id] = (combined_path, total_cost, (i, o, d))
+                    iod_path_dict[path_id] = (
+                        tuple(combined_path),
+                        total_cost,
+                        (i, o, d),
+                    )
                     path_id += 1
 
         return iod_path_tuple, iod_path_dict
@@ -288,13 +299,13 @@ class AMoDEnv:
         `PATH`: str, path to store CPLEX output
         """
         t = self.time
-        demand_attr = [
-            (i, j, self.pax_demand[t][(i, j)][0], self.pax_demand[t][(i, j)][1])
-            for i, j in product(self.origins, self.destinations)
-            if t in self.pax_demand.keys()
-            and (i, j) in self.pax_demand[t].keys()
-            and self.pax_demand[t][(i, j)][0] > 1e-6
-        ]  # Demand attributes, (origin, destination, demand, price)
+        # demand_attr = [
+        #     (i, j, self.pax_demand[t][(i, j)][0], self.pax_demand[t][(i, j)][1])
+        #     for i, j in product(self.origins, self.destinations)
+        #     if t in self.pax_demand.keys()
+        #     and (i, j) in self.pax_demand[t].keys()
+        #     and self.pax_demand[t][(i, j)][0] > 1e-6
+        # ]  # Demand attributes, (origin, destination, demand, price)
         acc_tuple = [
             (i, self.acc[i][t + 1]) for i in self.acc
         ]  # Accumulation attributes
@@ -321,12 +332,10 @@ class AMoDEnv:
         res_file = matching_path + "res_{}.dat".format(t)
         with open(data_file, "w", encoding="UTF-8") as f:
             f.write('path="' + res_file + '";\r')
-            # Writing demandAttr
-            # f.write(f"demandAttr = {self.format_for_opl(demand_attr)};\n")
             # Writing accInitTuple
             f.write(f"accInitTuple = {self.format_for_opl(acc_tuple)};\n")
             # Writing iodPathTuple
-            f.write(f"iodPathTuple = {self.format_for_opl(iod_path_tuple)};\n")
+            f.write(f"ioPathTuple = {self.format_for_opl(iod_path_tuple)};\n")
         mod_file = mod_path + "matching_path.mod"
         if CPLEXPATH is None:
             CPLEXPATH = "C:/Program Files/ibm/ILOG/CPLEX_Studio1210/opl/bin/x64_win64/"
@@ -352,11 +361,8 @@ class AMoDEnv:
                         if len(v) == 0:
                             continue
                         i, o, d, pid, f = v.split(",")
-                        flow[int(i), int(o), int(d), int(pid)] = float(f)
-        pax_action = {
-            (i, o, d, pid): flow[i, o, d, pid] if (i, o, d, pid) in flow else 0
-            for i, o, d, pid, _, _, _ in iod_path_tuple
-        }
+                        flow[str(i), str(o), str(d), int(pid)] = float(f)
+        pax_action = {key: value for key, value in flow.items() if value > 1e-6}
         # pax_action: Retreived from OPL and formulated to be used in pax_step and LTM. pax_action[(i,o,d,path_id)] = flow starting from i to o to d, using path_id. For path_id correspondence see iod_path_tuple.
         # iod_path_dict: Formulated to be used in pax_step and LTM. iod_path_dict[path_id] = (path, cost)
         return pax_action, iod_path_dict
@@ -373,6 +379,8 @@ class AMoDEnv:
         delta_t = self.time_step
         # Do a step in passenger matching
         for i in self.network.nodes:
+            if i[-1] == "*":
+                continue
             self.acc[i][t + 1] = self.acc[i][t]
         self.info["served_demand"] = 0  # initialize served demand
         self.info["operating_cost"] = 0  # initialize operating cost
@@ -395,17 +403,17 @@ class AMoDEnv:
         for pid in iod_path_demands.keys():
             self.path_demands[paxPathDict[pid][0]][t] = iod_path_demands[pid]
         # Obtain link demands from path demands
-        if self.link_demands is None:
-            self.link_demands = {
-                edge: {time: 0 for time in range(self.total_time // self.time_step)}
-                for edge in self.network.edges(keys=True)
-            }
+        # if self.link_demands is None:
+        self.link_demands = {
+            edge: {time: 0 for time in range(self.total_time // self.time_step)}
+            for edge in self.network.edges(keys=True)
+        }
         for pid, flow in iod_path_demands.items():
             self.path_demands[paxPathDict[pid][0]][t + delta_t] += flow
-            link_travel_time = 0
+            path_travel_time = 0
             for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
                 self.link_demands[(edge_start, edge_end, edge_key)][t] += flow
-                link_travel_time += self.link_mean_travel_time[
+                path_travel_time += self.link_mean_travel_time[
                     (edge_start, edge_end, edge_key)
                 ][t]
                 # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
@@ -421,21 +429,21 @@ class AMoDEnv:
             # Update the served demand and the revenue
             o, d = paxPathDict[pid][2][1], paxPathDict[pid][2][2]
             assert iod_path_demands[pid] < self.acc[o][t + 1] + 1e-3
-            self.servedDemand[o, d][t] = self.iod_path_demands[pid]
-            self.paxFlow[o, d][t + link_travel_time] = self.iod_path_demands[pid]
+            self.served_demand[o, d][t] = iod_path_demands[pid]
+            self.pax_flow[o, d][t + path_travel_time] = iod_path_demands[pid]
             self.info["operating_cost"] += (
-                link_travel_time * self.beta * self.iod_path_demands[pid]
+                path_travel_time * self.beta * iod_path_demands[pid]
             )
-            self.acc[i][t + 1] -= self.iod_path_demands[pid]
-            self.info["served_demand"] += self.servedDemand[pid][t]
-            self.dacc[d][t + link_travel_time] += self.paxFlow[pid][
-                t + link_travel_time
+            self.acc[i][t + 1] -= iod_path_demands[pid]
+            self.info["served_demand"] += self.served_demand[pid][t]
+            self.dacc[d][t + path_travel_time] += self.pax_flow[pid][
+                t + path_travel_time
             ]
             self.reward += self.iod_path_demand[pid] * (
-                self.pax_demand[t][(o, d)][1] - self.beta * self.iod_path_demand[pid]
+                self.pax_demand[t][(o, d)][1] - self.beta * self.iod_path_demands[pid]
             )
             self.info["revenue"] += (
-                self.iod_path_demand[pid] * self.pax_demand[t][(o, d)][1]
+                self.iod_path_demands[pid] * self.pax_demand[t][(o, d)][1]
             )
 
         self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
@@ -486,14 +494,13 @@ class AMoDEnv:
                 self.acc[edge_end][t + 1] += self.rebFlow[
                     edge_start, edge_end, edge_key
                 ][t]
-            if (edge_start, edge_end, edge_key) in self.paxFlow and t in self.paxFlow[
+            if (edge_start, edge_end, edge_key) in self.link_demands and t in self.link_demands[
                 edge_start, edge_end, edge_key
             ]:
-                self.acc[edge_end][t + 1] += self.paxFlow[
+                self.acc[edge_end][t + 1] += self.link_demands[
                     edge_start, edge_end, edge_key
-                ][
-                    t
-                ]  # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
+                ][t]
+                # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
 
         # self.time += 1
         self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
@@ -803,6 +810,7 @@ class Scenario:
                 self._read_demand_sioux_falls(file_path_trips)
             )
             pax_demand = self._distribute_temporal_demand(base_demand, price_scale)
+            G = self._generate_dummy_od_links(G, origins, destinations)
         else:
             raise ValueError(f"Unsupported network name: {name}")
 
@@ -827,8 +835,8 @@ class Scenario:
             if line.strip():
                 parts = line.split()
                 edge_data = {
-                    "init_node": int(parts[0]),
-                    "term_node": int(parts[1]),
+                    "init_node": str(parts[0]),
+                    "term_node": str(parts[1]),
                     "capacity": float(parts[2]),
                     "length": float(parts[3]),  # In km
                     "free_flow_time": float(parts[4]),  # In minutes
@@ -836,6 +844,7 @@ class Scenario:
                     "power": float(parts[6]),
                     "speed_limit": float(parts[7]),
                     "toll": float(parts[8]),
+                    "type": "normal",  # Read edges are all normal, will generate dummy edges later, and their type would be "origin" or "destination"
                     "link_type": int(parts[9]),
                     "ffs": float(parts[3])
                     / (float(parts[4]) / 60),  # free flow speed, in km/h
@@ -866,7 +875,7 @@ class Scenario:
         for line in lines:
             if line.startswith("Origin"):
                 parts = line.split()
-                origin = int(parts[1])
+                origin = str(parts[1])
                 origins.add(origin)
                 demand[origin] = {}
             elif origin is not None:
@@ -875,9 +884,9 @@ class Scenario:
                     if ":" in part:
                         dest, flow = part.split(":")
                         origins.add(origin)
-                        destinations.add(int(dest.strip()))
+                        destinations.add(str(dest.strip()))
                         od_pairs.add((origin, dest))
-                        demand[origin][int(dest.strip())] = float(flow.strip())
+                        demand[origin][str(dest.strip())] = float(flow.strip())
         return demand, origins, destinations, od_pairs
 
     def _distribute_temporal_demand(
@@ -893,12 +902,13 @@ class Scenario:
             )
             for origin, destinations in base_demand.items():
                 for destination, od_demand in destinations.items():
-                    adjusted_demand = od_demand * time_factor
-                    price = random.randint(price_scale[0], price_scale[1])
-                    pax_demand[time][(origin, destination)] = (
-                        adjusted_demand,
-                        price,
-                    )
+                    if random.random() < scale:
+                        adjusted_demand = od_demand * time_factor
+                        price = random.randint(price_scale[0], price_scale[1])
+                        pax_demand[time][(origin, destination)] = (
+                            adjusted_demand,
+                            price,
+                        )
         return pax_demand
 
     def _temporal_distribution_factor(self, time, peak_time, std_dev):
@@ -935,7 +945,7 @@ class Scenario:
                 type="origin",
             )
         for d in destinations:
-            network.add_node(d + "*")
+            network.add_node(d + "**")
             network.add_edge(
                 d,
                 d + "*",

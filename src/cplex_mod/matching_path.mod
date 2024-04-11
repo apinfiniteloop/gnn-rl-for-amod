@@ -66,7 +66,7 @@ main {
         ofile.write(e.id);
         ofile.write(",");
         ofile.write(thisOplModel.demandFlow[e]);
-        ofile.writeln(")");
+        ofile.write(")");
     }
     ofile.writeln("];");
     ofile.close();
