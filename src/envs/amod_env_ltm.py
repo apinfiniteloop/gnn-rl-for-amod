@@ -64,8 +64,8 @@ class AMoDEnv:
                 continue
             self.acc[node][0] = self.network.nodes[node][
                 "accInit"
-            ]  # TODO: No accInit in Sioux Falls network. Random generation instead.
-            self.dacc[node][0] = defaultdict(float)
+            ]  # No accInit in Sioux Falls network. Random generation instead.
+            self.dacc[node] = defaultdict(float)
 
         # LTM related variables
         self.cvn = defaultdict(EdgeKeyDict)  # Cumulative Vehicle Number
@@ -188,10 +188,15 @@ class AMoDEnv:
 
     def update_traffic_flow_and_travel_time(self, time):
         for edge in self.network.edges(keys=True):
+            if (
+                self.network.edges[edge]["type"] == "origin"
+                or self.network.edges[edge]["type"] == "destination"
+            ):
+                continue
             self.link_traffic_flow[edge][time] = self.get_link_traffic_flow(edge, time)
-            # self.link_mean_travel_time[edge][time] = self.get_link_mean_travel_time(
-            #     edge
-            # )
+            self.link_mean_travel_time[edge][time] = self.get_link_travel_time(
+                edge, time=time
+            )
 
     def generate_path_ids(
         self,
@@ -427,23 +432,27 @@ class AMoDEnv:
                         if self.network.edges[edge]["type"] == "destination":
                             self.link_demands[edge][t] += flow
             # Update the served demand and the revenue
-            o, d = paxPathDict[pid][2][1], paxPathDict[pid][2][2]
-            assert iod_path_demands[pid] < self.acc[o][t + 1] + 1e-3
+            i, o, d = (
+                paxPathDict[pid][2][0],
+                paxPathDict[pid][2][1],
+                paxPathDict[pid][2][2],
+            )
+            assert iod_path_demands[pid] < self.acc[i][t + 1] + 1e-3
             self.served_demand[o, d][t] = iod_path_demands[pid]
             self.pax_flow[o, d][t + path_travel_time] = iod_path_demands[pid]
             self.info["operating_cost"] += (
                 path_travel_time * self.beta * iod_path_demands[pid]
             )
             self.acc[i][t + 1] -= iod_path_demands[pid]
-            self.info["served_demand"] += self.served_demand[pid][t]
-            self.dacc[d][t + path_travel_time] += self.pax_flow[pid][
+            self.info["served_demand"] += self.served_demand[o, d][t]
+            self.dacc[d][t + path_travel_time] += self.pax_flow[o, d][
                 t + path_travel_time
             ]
-            self.reward += self.iod_path_demand[pid] * (
-                self.pax_demand[t][(o, d)][1] - self.beta * self.iod_path_demands[pid]
+            self.reward += iod_path_demands[pid] * (
+                self.pax_demand[t][(o, d)][1] - self.beta * iod_path_demands[pid]
             )
             self.info["revenue"] += (
-                self.iod_path_demands[pid] * self.pax_demand[t][(o, d)][1]
+                iod_path_demands[pid] * self.pax_demand[t][(o, d)][1]
             )
 
         self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
@@ -494,7 +503,11 @@ class AMoDEnv:
                 self.acc[edge_end][t + 1] += self.rebFlow[
                     edge_start, edge_end, edge_key
                 ][t]
-            if (edge_start, edge_end, edge_key) in self.link_demands and t in self.link_demands[
+            if (
+                edge_start,
+                edge_end,
+                edge_key,
+            ) in self.link_demands and t in self.link_demands[
                 edge_start, edge_end, edge_key
             ]:
                 self.acc[edge_end][t + 1] += self.link_demands[
@@ -685,6 +698,28 @@ class AMoDEnv:
             np.arange(self.total_time),
         )
         return sum([inv_2[i] - inv_1[i] for i in range(len(inv_2))]) / len(inv_2)
+
+    def get_link_travel_time(self, edge, time):
+        if (
+            self.network.edges[edge]["type"] == "origin"
+            or self.network.edges[edge]["type"] == "destination"
+        ):
+            raise ValueError("Cannot calculate travel time for dummy links.")
+        if self.cvn[edge][time][0] == 0:
+            return self.network.edges[edge]["free_flow_time"]
+        else:
+            # Initialize x to be the time step just before the given time
+            x = time - 1
+            # Loop backwards to find the x such that cvn[edge][x][0] == cvn[edge][time][1]
+            while x >= 0:
+                if self.cvn[edge][x][0] == self.cvn[edge][time][1]:
+                    break  # Found the desired time x
+                x -= 1
+            # If x is found within the valid range, calculate and return the travel time
+            if x >= 0:
+                return time - x
+            else:
+                raise ValueError("No suitable x found within the valid time range.")
 
     def get_link_traffic_flow(self, edge, time):
         return self.cvn[edge][time][0] - self.cvn[edge][time][1]
@@ -885,7 +920,7 @@ class Scenario:
                         dest, flow = part.split(":")
                         origins.add(origin)
                         destinations.add(str(dest.strip()))
-                        od_pairs.add((origin, dest))
+                        od_pairs.add((origin, str(dest.strip)))
                         demand[origin][str(dest.strip())] = float(flow.strip())
         return demand, origins, destinations, od_pairs
 
