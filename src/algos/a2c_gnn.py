@@ -16,6 +16,7 @@ import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
+import networkx as nx
 from torch.distributions import Dirichlet
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
@@ -120,7 +121,15 @@ class GNNParser:
         if self.use_grid:
             edge_index, pos_coord = grid(height=self.grid_h, width=self.grid_w)
         else:
-            pyg_graph = from_networkx(self.env.network)
+            if type(self.env.network) == nx.MultiDiGraph:
+                network = nx.DiGraph()
+                for node in self.env.network.nodes:
+                    if node[-1] != '*':
+                        network.add_node(node)
+                for edge in self.env.network.edges:
+                    if self.env.network.edges[edge]['type'] != 'origin' and self.env.network.edges[edge]['type'] != 'destination':
+                        network.add_edge(edge[0], edge[1])
+            pyg_graph = from_networkx(network)
             edge_index = pyg_graph.edge_index
         data = Data(x, edge_index)
         return data
@@ -197,7 +206,7 @@ class A2C(nn.Module):
         input_size,
         eps=np.finfo(np.float32).eps.item(),
         device=torch.device("cpu"),
-        estimate_bpr=False,
+        estimate_bpr=True,
     ):
         super(A2C, self).__init__()
         self.env = env
