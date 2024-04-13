@@ -1,6 +1,6 @@
 import networkx as nx
 import pickle
-from itertools import product, islice
+from itertools import product
 
 
 class PathCacheManager:
@@ -10,7 +10,7 @@ class PathCacheManager:
         self.path_cache = {}
         self.cached_loaded = False
 
-    def cache_paths(self, origins, destinations, truncate=5):
+    def cache_paths(self, origins, destinations, truncate=3):
         """
         Compute and cache paths for all combinations of i, o, d.
 

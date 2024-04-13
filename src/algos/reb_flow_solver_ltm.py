@@ -6,11 +6,12 @@ from src.misc.utils import mat2str
 
 def solveRebFlow(env, res_path, desiredAcc, gen_cost, CPLEXPATH):
     t = env.time
-    accRLTuple = [(n, int(round(desiredAcc[n]))) for n in desiredAcc]
-    accTuple = [(n, int(env.acc[n][t + 1])) for n in env.acc]
+    accRLTuple = [(int(n), int(round(desiredAcc[n]))) for n in desiredAcc]
+    accTuple = [(int(n), int(env.acc[n][t + 1])) for n in env.acc]
     edgeAttr = [
-        (i, j, k, gen_cost[i, j, k] if (i, j, k) in gen_cost else 0)
-        for i, j, k in env.G.edges(data=False, keys=True)
+        (int(i), int(j), int(k), gen_cost[i, j, k][t] if (i, j, k) in gen_cost else 0)
+        for i, j, k in env.network.edges(data=False, keys=True)
+        if i[-1] != "*" and j[-1] != "*"
     ]
     modPath = os.getcwd().replace("\\", "/") + "/src/cplex_mod/"
     OPTPath = (
@@ -52,5 +53,9 @@ def solveRebFlow(env, res_path, desiredAcc, gen_cost, CPLEXPATH):
                         continue
                     i, j, k, f = v.split(",")
                     flow[i, j, k] = float(f)
-    action = [flow[i, j, k] for i, j, k in env.edges(data=False, keys=True)]
-    return action
+    # action = [
+    #     flow[i, j, k]
+    #     for i, j, k in env.network.edges(data=False, keys=True)
+    #     if (i, j, k) in flow.keys()
+    # ]
+    return flow

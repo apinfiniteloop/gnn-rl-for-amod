@@ -20,7 +20,8 @@ import networkx as nx
 from torch.distributions import Dirichlet
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
-from torch_geometric.nn import global_mean_pool, global_max_pool
+
+# from torch_geometric.nn import global_mean_pool, global_max_pool
 from torch_geometric.utils.convert import from_networkx
 from torch_geometric.utils import grid
 from collections import namedtuple
@@ -65,23 +66,46 @@ class GNNParser:
             torch.cat(
                 (
                     torch.tensor(
-                        [obs[0][n][self.env.time + 1] * self.s for n in self.env.region]
+                        [
+                            obs[4][n][self.env.time + 1] * self.s
+                            for n in [
+                                edge
+                                for edge in self.env.network.edges(keys=True)
+                                if edge[0][-1] != "*" and edge[1][-1] != "*"
+                            ]
+                        ]
                     )
-                    .view(1, 1, self.env.nregion)
+                    .view(1, 1, self.env.nedges)
+                    .float(),
+                    torch.tensor(
+                        [
+                            obs[5][n][self.env.time] * self.s
+                            for n in [
+                                edge
+                                for edge in self.env.network.edges(keys=True)
+                                if edge[0][-1] != "*" and edge[1][-1] != "*"
+                            ]
+                        ]
+                    )
+                    .view(1, 1, self.env.nedges)
                     .float(),
                     torch.tensor(
                         [
                             [
-                                (obs[0][n][self.env.time + 1] + self.env.dacc[n][t])
+                                (
+                                    obs[0][edge[0]][self.env.time + 1]
+                                    + self.env.dacc[edge[0]][t]
+                                )
                                 * self.s
-                                for n in self.env.region
+                                for edge in self.env.network.edges(keys=True)
+                                if edge[0][-1] != "*" and edge[1][-1] != "*"
                             ]
                             for t in range(
                                 self.env.time + 1, self.env.time + self.T + 1
                             )
                         ]
                     )
-                    .view(1, self.T, self.env.nregion)
+                    .view(1, self.T, self.env.nedges)
                     .float(),
                     torch.tensor(
                         [
@@ -89,33 +113,35 @@ class GNNParser:
                                 sum(
                                     [
                                         (
-                                            self.env.scenario.demand_input[i, j][t]
-                                            if t in self.env.scenario.demand_input[i, j]
+                                            self.env.scenario.demand_input[i[0], j][t]
+                                            if t
+                                            in self.env.scenario.demand_input[i[0], j]
                                             else 0
                                         )
                                         * (
-                                            self.env.price[i, j][t]
-                                            if t in self.env.price[i, j]
+                                            self.env.price[i[0], j][t]
+                                            if t in self.env.price[i[0], j]
                                             else 0
                                         )
                                         * self.s
                                         for j in self.env.region
                                     ]
                                 )
-                                for i in self.env.region
+                                for i in self.env.network.edges(keys=True)
+                                if i[0][-1] != "*" and i[1][-1] != "*"
                             ]
                             for t in range(
                                 self.env.time + 1, self.env.time + self.T + 1
                             )
                         ]
                     )
-                    .view(1, self.T, self.env.nregion)
+                    .view(1, self.T, self.env.nedges)
                     .float(),
                 ),
                 dim=1,
             )
             .squeeze(0)
-            .view(21, self.env.nregion)
+            .view(22, self.env.nedges)
             .T
         )
         if self.use_grid:
@@ -124,10 +150,13 @@ class GNNParser:
             if type(self.env.network) == nx.MultiDiGraph:
                 network = nx.DiGraph()
                 for node in self.env.network.nodes:
-                    if node[-1] != '*':
+                    if node[-1] != "*":
                         network.add_node(node)
                 for edge in self.env.network.edges:
-                    if self.env.network.edges[edge]['type'] != 'origin' and self.env.network.edges[edge]['type'] != 'destination':
+                    if (
+                        self.env.network.edges[edge]["type"] != "origin"
+                        and self.env.network.edges[edge]["type"] != "destination"
+                    ):
                         network.add_edge(edge[0], edge[1])
             pyg_graph = from_networkx(network)
             edge_index = pyg_graph.edge_index
@@ -264,11 +293,15 @@ class A2C(nn.Module):
         m = Dirichlet(concentration)
 
         action = m.sample()
-        self.saved_actions.append(SavedAction(m.log_prob(action), value))
+        self.saved_actions.append(
+            SavedAction(m.log_prob(action), value)
+        )  # 生成多元正态分布，两个log_prob相乘
         if taylor_params is None:
             return list(action.cpu().numpy())
         else:
-            return list(action.cpu().numpy()), list(taylor_params.cpu().numpy())
+            return list(action.cpu().numpy()), list(
+                taylor_params.cpu().detach().numpy()
+            )
 
     def training_step(self):
         R = 0

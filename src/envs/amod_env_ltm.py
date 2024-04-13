@@ -33,7 +33,8 @@ class AMoDEnv:
         # Demand related variables
         # self.paths = scenario.all_paths
         self.region = [node for node in self.network.nodes if node[-1] != "*"]
-        self.nregion = len(self.region)
+        self.nregions = scenario.nregions
+        self.nedges = scenario.nedges
         self.origins = scenario.origins
         self.destinations = scenario.destinations
         self.od_pairs = scenario.od_pairs
@@ -163,23 +164,25 @@ class AMoDEnv:
             )
 
     def eval_network_gen_cost(self, time, coeffs):
-        for edge in self.network.edges(keys=True):
+        for idx, edge in enumerate(edges:=[edge for edge in self.network.edges(keys=True) if edge[0][-1] != '*' and edge[1][-1] != '*']):
             self.gen_cost[edge][time] = self.approximate_gen_cost_function(
                 current_traffic_flow=self.link_traffic_flow[edge][time],
                 avg_traffic_flow=np.average(self.link_traffic_flow[edge][: time - 1]),
-                coeffs=coeffs,
+                coeffs=coeffs, idx=idx
             )
 
     def approximate_gen_cost_function(
-        self, current_traffic_flow, avg_traffic_flow, coeffs
+        self, current_traffic_flow, avg_traffic_flow, coeffs, idx 
     ):
+
         if coeffs is not None:
-            approximation = coeffs[0]
+            coeff = coeffs[idx]
+            approximation = coeff[0]
 
             # Add the rest of the Taylor series terms
-            for i in range(1, len(coeffs)):
+            for i in range(1, len(coeff)):
                 term = (
-                    coeffs[i]
+                    coeff[i]
                     * (current_traffic_flow - avg_traffic_flow) ** i
                     / math.factorial(i)
                 )
@@ -418,6 +421,15 @@ class AMoDEnv:
         }
         for pid, flow in iod_path_demands.items():
             self.path_demands[paxPathDict[pid][0]][t + delta_t] += flow
+            path = paxPathDict[pid][0]
+            for edge in self.network.in_edges(paxPathDict[pid][0][0][0], keys=True):
+                if self.network.edges[edge]["type"] == "origin":
+                    path.insert(0, edge)
+            for edge in self.network.out_edges(paxPathDict[pid][0][-1][1], keys=True):
+                if self.network.edges[edge]["type"] == "destination":
+                    path.append(edge)
+            for i in range(len(path)-1):
+                self.node_transition_demand[path[i][1]][path[i]][path[i+1]][t] += flow
             path_travel_time = 0
             for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
                 self.link_demands[(edge_start, edge_end, edge_key)][t] += flow
@@ -458,7 +470,15 @@ class AMoDEnv:
                 iod_path_demands[pid] * self.pax_demand[t][(o, d)][1]
             )
 
-        self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
+        # self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
+        self.obs = (
+            self.acc,
+            self.time,
+            self.dacc,
+            self.pax_demand,
+            self.link_demands,
+            self.link_traffic_flow,
+        )
         done = False
         return self.obs, max(0, self.reward), done, self.info
 
@@ -467,43 +487,48 @@ class AMoDEnv:
         self.reward = 0
         self.rebAction = rebAction
         # Rebalancing
-        for k, (edge_start, edge_end, edge_key) in enumerate(
-            self.network.edges(keys=True, data=False)
+        for idx, k in enumerate(
+            [edge for edge in self.network.edges(keys=True, data=False) if edge[0][-1] != '*' and edge[1][-1] != '*']
         ):
+            edge_start, edge_end, edge_key = k
             self.rebAction[k] = min(self.acc[edge_start][t + 1], rebAction[k])
-            self.rebFlow[edge_start, edge_end, edge_key][
-                t + self.rebTime[edge_start, edge_end, edge_key][t]
+            self.reb_flow[edge_start, edge_end, edge_key][
+                t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
             ] = self.rebAction[k]
             self.acc[edge_start][t + 1] -= self.rebAction[k]
             self.dacc[edge_end][
-                t + self.rebTime[edge_start, edge_end, edge_key][t]
-            ] += self.rebFlow[edge_start, edge_end, edge_key][
-                t + self.rebTime[edge_start, edge_end, edge_key][t]
+                t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
+            ] += self.reb_flow[edge_start, edge_end, edge_key][
+                t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
             ]
             self.info["rebalancing_cost"] += (
-                self.rebTime[edge_start, edge_end, edge_key][t]
+                self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
                 * self.beta
                 * self.rebAction[k]
             )
             self.info["operating_cost"] += (
-                self.rebTime[edge_start, edge_end, edge_key][t]
+                self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
                 * self.beta
                 * self.rebAction[k]
             )
             self.reward -= (
                 self.rebAction[k]
                 * self.beta
-                * self.rebTime[edge_start, edge_end, edge_key][t]
+                * self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
             )
         # arrival for the next time step, executed in the last state of a time step
         # this makes the code slightly different from the previous version, where the following codes are executed between matching and rebalancing
         for k, (edge_start, edge_end, edge_key) in enumerate(
-            self.network.edges(keys=True, data=False)
+            [
+                edge
+                for edge in self.network.edges(keys=True, data=False)
+                if edge[0][-1] != "*" and edge[1][-1] != "*"
+            ]
         ):
-            if (edge_start, edge_end, edge_key) in self.rebFlow and t in self.rebFlow[
+            if (edge_start, edge_end, edge_key) in self.reb_flow and t in self.reb_flow[
                 edge_start, edge_end, edge_key
             ]:
-                self.acc[edge_end][t + 1] += self.rebFlow[
+                self.acc[edge_end][t + 1] += self.reb_flow[
                     edge_start, edge_end, edge_key
                 ][t]
             if (
@@ -773,20 +798,21 @@ class Scenario:
             random.seed(self.seed)
         self.total_time = total_time
         self.time_step = time_step
+        self.nedges = 0
+        self.nregions = 0
         self.demand_input = defaultdict(dict)
         self.price = defaultdict(dict)
         if use_sample_network:
             self.is_json = False
-            self.G, self.pax_demand, self.origins, self.destinations, self.od_pairs = (
-                self._load_sample_network(sample_network_name)
-            )
-            # (
-            #     self.path_demands,
-            #     self.link_demands,
-            # ), self.all_paths = self._generate_random_demand(self.G, self.total_time, 2)
-            # self.pax_demand = self._generate_random_demand(
-            #     self.G, self.total_time, self.time_step
-            # )
+            (
+                self.G,
+                self.pax_demand,
+                self.origins,
+                self.destinations,
+                self.od_pairs,
+                self.nregions,
+                self.nedges,
+            ) = self._load_sample_network(sample_network_name)
         else:
             # If Using json file. TODO: Need a json file to complete.
             raise NotImplementedError
@@ -794,10 +820,6 @@ class Scenario:
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
         self.ffs = ffs
-
-        # self.origins = set()
-        # self.destinations = set()
-        # self.od_pairs = set()
 
     def _load_sample_network(self, name, demand_scale=(0, 5), price_scale=(10, 30)):
         """
@@ -847,6 +869,8 @@ class Scenario:
             edges = self._read_network_sioux_falls(file_path_network)
             G = self._create_multidigraph(edges)
             G = self._generate_init_acc(G)
+            nregions = len(G.nodes)
+            nedges = len(G.edges)
             base_demand, origins, destinations, od_pairs = (
                 self._read_demand_sioux_falls(file_path_trips)
             )
@@ -855,7 +879,7 @@ class Scenario:
         else:
             raise ValueError(f"Unsupported network name: {name}")
 
-        return G, pax_demand, origins, destinations, od_pairs
+        return G, pax_demand, origins, destinations, od_pairs, nregions, nedges
 
     def _initialize_pax_demand(self):
         # Initialize the passenger demand dictionary for each time step

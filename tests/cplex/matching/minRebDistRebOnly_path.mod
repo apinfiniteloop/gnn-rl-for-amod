@@ -37,8 +37,8 @@ subject to
 {
   forall(i in region)
     {
-    sum(e in edges: e.i==i && e.i!=e.j) (rebFlow[<e.j, e.i, e.id>] - rebFlow[<e.i, e.j, e.id>]) >= desiredVehicles[i] - vehicles[i];
-    sum(e in edges: e.i==i && e.i!=e.j) rebFlow[<e.i, e.j, e.id>] <= vehicles[i];
+    A1:sum(e in edges: e.i==i && e.i!=e.j) (rebFlow[<e.j, e.i, e.id>] - rebFlow[<e.i, e.j, e.id>]) >= desiredVehicles[i] - vehicles[i];
+    A2:sum(e in edges: e.i==i && e.i!=e.j) rebFlow[<e.i, e.j, e.id>] <= vehicles[i];
     }
 }
 

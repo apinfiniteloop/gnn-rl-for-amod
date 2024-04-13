@@ -93,7 +93,7 @@ env = AMoD(scenario, beta=args.beta)
 # env.cache_paths()
 
 # Initialize A2C-GNN
-model = A2C(env=env, input_size=21, estimate_bpr=args.estimate_bpr).to(device)
+model = A2C(env=env, input_size=22, estimate_bpr=args.estimate_bpr).to(device)
 
 if not args.test:
     #######################################
@@ -136,8 +136,10 @@ if not args.test:
                 env.region[i]: int(action_rl[i] * dictsum(env.acc, env.time + 1))
                 for i in range(len(env.region))
             }
+            if args.estimate_bpr:
+                env.eval_network_gen_cost(time=step, coeffs=taylor_params)
             # solve minimum rebalancing distance problem (Step 3 in paper)
-            rebAction = solveRebFlow(env, "scenario_nyc4", desiredAcc, args.cplexpath)
+            rebAction = solveRebFlow(env, "scenario_nyc4", desiredAcc, env.gen_cost, args.cplexpath)
             # Take action in environment
             new_obs, rebreward, done, info = env.reb_step(rebAction)
             episode_reward += rebreward

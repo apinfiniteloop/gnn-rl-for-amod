@@ -23,6 +23,16 @@
 			</ref>
             		
         </config>
+        		
+        <config default="false" name="reb_path" category="opl">
+            			
+            <ref name="reb_0.dat" type="data">
+			</ref>
+            			
+            <ref name="minRebDistRebOnly_path.mod" type="model">
+			</ref>
+            		
+        </config>
         	
     </configs>
     	
