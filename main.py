@@ -161,13 +161,13 @@ if not args.test:
         )
         # Checkpoint best performing model
         if episode_reward >= best_reward:
-            model.save_checkpoint(path=f"./{args.directory}/ckpt/nyc4/a2c_gnn_test.pth")
+            model.save_checkpoint(path=f"{args.directory}/ckpt/nyc4/a2c_gnn_test.pth")
             best_reward = episode_reward
         # Log KPIs
         log["train_reward"].append(episode_reward)
         log["train_served_demand"].append(episode_served_demand)
         log["train_reb_cost"].append(episode_rebalancing_cost)
-        model.log(log, path=f"./{args.directory}/rl_logs/nyc4/a2c_gnn_test.pth")
+        model.log(log, path=f"{args.directory}/rl_logs/nyc4/a2c_gnn_test.pth")
 else:
     # Load pre-trained model
     model.load_checkpoint(path=f"./{args.directory}/ckpt/nyc4/a2c_gnn.pth")

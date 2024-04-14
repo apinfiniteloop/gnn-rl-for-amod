@@ -9,7 +9,7 @@
             <ref name="matching_path.mod" type="model">
 			</ref>
             			
-            <ref name="data_0.dat" type="data">
+            <ref name="data_4.dat" type="data">
 			</ref>
             		
         </config>
@@ -24,12 +24,22 @@
             		
         </config>
         		
-        <config default="false" name="reb_path" category="opl">
-            			
-            <ref name="reb_0.dat" type="data">
-			</ref>
+        <config default="false" name="reb_path_relaxed" category="opl">
             			
             <ref name="minRebDistRebOnly_path.mod" type="model">
+			</ref>
+            			
+            <ref name="dat123.dat" type="data">
+			</ref>
+            		
+        </config>
+        		
+        <config default="false" name="reb_path" category="opl">
+            			
+            <ref name="dat123.dat" type="data">
+			</ref>
+            			
+            <ref name="minRebDistRebOnly_path_no_relax.mod" type="model">
 			</ref>
             		
         </config>

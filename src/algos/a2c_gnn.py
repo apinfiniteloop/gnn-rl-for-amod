@@ -246,7 +246,7 @@ class A2C(nn.Module):
 
         self.D = 1
         if estimate_bpr:
-            self.T = 1
+            self.T = 3
         else:
             self.T = 0
 

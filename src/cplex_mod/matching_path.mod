@@ -1,5 +1,3 @@
-// Revised OPL Script for Passenger Matching Problem using numeric IDs
-
 tuple iodPathTuple{
     int i;
     int o;
@@ -23,15 +21,15 @@ tuple iod_path {
 }
 
 tuple iod_Edge{
-    int i; // Node ID
-    int o; // Origin ID
-    int d; // Destination ID
+    int i;
+    int o;
+    int d;
 }
 
 
 string path = ...;
-{iodPathTuple} ioPathTuple = ...;
 {Accumulation} accInitTuple = ...;
+{iodPathTuple} ioPathTuple = ...;
 {iod_Edge} demandEdge = {<i,o,d>|<i,o,d,id,c,de,p> in ioPathTuple};
 {iod_path} demandPath = {<i,o,d,id>|<i,o,d,id,c,de,p> in ioPathTuple};
 {int} region = {i|<i,v> in accInitTuple};

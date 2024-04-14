@@ -30,15 +30,14 @@ float desiredVehicles[region] = [i:v|<i,v> in accRLTuple]; // TODO: desiredVehic
 //float accInit[region] = [i:v|<i,v> in accInitTuple];
 float vehicles[region] = [i:v|<i,v> in accInitTuple]; // TODO: vehicles
 
-dvar float+ slack[region]; // Non-negative slack variables
 dvar int+ rebFlow[edges];
 
-minimize(sum(e in edges) (rebFlow[e]*time[e])) + 0.05 * sum(i in region) slack[i];
+minimize(sum(e in edges) (rebFlow[e]*time[e]));
 subject to
 {
   forall(i in region)
     {
-    A1: sum(e in edges: e.i==i && e.i!=e.j) (rebFlow[<e.j, e.i, e.id>] - rebFlow[<e.i, e.j, e.id>]) + slack[i] >= desiredVehicles[i] - vehicles[i];
+    A1: sum(e in edges: e.i==i && e.i!=e.j) (rebFlow[<e.j, e.i, e.id>] - rebFlow[<e.i, e.j, e.id>]) >= desiredVehicles[i] - vehicles[i];
     sum(e in edges: e.i==i && e.i!=e.j) rebFlow[<e.i, e.j, e.id>] <= vehicles[i];
     }
 }

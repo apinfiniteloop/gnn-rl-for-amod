@@ -58,10 +58,10 @@ class AMoDEnv:
 
         # Vehicle count related variables
         self.acc = defaultdict(
-            dict
+            lambda: defaultdict(int)
         )  # number of vehicles within each node, acc[t][i] <-> number of vehicles at node i at time t
         self.dacc = defaultdict(
-            dict
+            lambda: defaultdict(int)
         )  # number of vehicles arriving at each node, dacc[t][i] <-> number of vehicles arriving at node i at time t
         for node in self.network.nodes:
             if node[-1] == "*":
@@ -77,18 +77,18 @@ class AMoDEnv:
         self.cvn = {  # Initialize N(x, t) for all edges
             tuple(edge): {
                 t: {0: 0, 1: 0}  # Upstream end  # Downstream end
-                for t in range(self.total_time)
+                for t in range(self.total_time + 1)
             }
             for edge in self.network.edges
         }  # N(x, t)<->N[x][t][0/1]
         self.sending_flow = defaultdict(EdgeKeyDict)  # Sending Flow
         self.sending_flow = {  # Initialize sending flow for all edges
-            tuple(edge): {t: 0 for t in range(self.total_time)}
+            tuple(edge): {t: 0 for t in range(self.total_time + 1)}
             for edge in self.network.edges
         }  # S_i(t) <-> sending_flow[i][t]
         self.receiving_flow = defaultdict(EdgeKeyDict)  # Receiving Flow
         self.receiving_flow = {  # Initialize receiving flow for all edges
-            tuple(edge): {t: 0 for t in range(self.total_time)}
+            tuple(edge): {t: 0 for t in range(self.total_time + 1)}
             for edge in self.network.edges
         }  # R_i(t) <-> receiving_flow[i][t]
         self.node_transition_demand = defaultdict(
@@ -98,7 +98,7 @@ class AMoDEnv:
             {  # Initialize node transition demand for all nodes
                 node: {
                     i: {
-                        j: {t: 0 for t in range(self.total_time)}
+                        j: {t: 0 for t in range(self.total_time + 1)}
                         for j in self.network.out_edges(node, keys=True)
                     }
                     for i in self.network.in_edges(node, keys=True)
@@ -108,12 +108,12 @@ class AMoDEnv:
         )
         self.link_mean_travel_time = defaultdict(EdgeKeyDict)
         self.link_mean_travel_time = {
-            tuple(edge): {t: 0 for t in range(self.total_time)}
+            tuple(edge): {t: 0 for t in range(self.total_time + 1)}
             for edge in self.network.edges
         }
         self.link_traffic_flow = defaultdict(EdgeKeyDict)
         self.link_traffic_flow = {
-            tuple(edge): [0 for t in range(self.total_time)]
+            tuple(edge): [0 for t in range(self.total_time + 1)]
             for edge in self.network.edges
         }  # self.link_traffic_flow[edge][t] <-> traffic flow on edge at time t
         # Misc variables
@@ -129,7 +129,10 @@ class AMoDEnv:
 
     def calculate_sending_flow(self, edge, edge_attrib, t):
         delta_t = self.time_step
-        ffs = self.ffs
+        try:
+            ffs = edge_attrib["ffs"]
+        except KeyError:
+            ffs = self.ffs  # Default ffs value
         # Source nodes and destination nodes don't have 'w' and 'k_j' attribute.
         if t + delta_t - edge_attrib["length"] / ffs < 0:
             return min(
@@ -137,19 +140,19 @@ class AMoDEnv:
                 edge_attrib["q_max"],
             )
         return min(
-            self.cvn[tuple(edge)][t + delta_t - edge_attrib["length"] / ffs][0]
+            self.cvn[tuple(edge)][int(t + delta_t - edge_attrib["length"] / ffs)][0]
             - self.cvn[tuple(edge)][t][1],
             edge_attrib["q_max"] * delta_t,
         )
 
     def calculate_receiving_flow(self, edge, edge_attrib, t):
         delta_t = self.time_step
-        if edge_attrib["type"] == "destination":
+        if edge_attrib["type"] == "destination" or edge_attrib["type"] == "origin":
             return np.inf
         try:
             return min(
                 self.cvn[tuple(edge)][
-                    t + delta_t + edge_attrib["length"] / edge_attrib["w"]
+                    int(t + delta_t + edge_attrib["length"] / edge_attrib["w"])
                 ][1]
                 + edge_attrib["k_j"] * edge_attrib["length"]
                 - self.cvn[tuple(edge)][t][0],
@@ -164,15 +167,25 @@ class AMoDEnv:
             )
 
     def eval_network_gen_cost(self, time, coeffs):
-        for idx, edge in enumerate(edges:=[edge for edge in self.network.edges(keys=True) if edge[0][-1] != '*' and edge[1][-1] != '*']):
-            self.gen_cost[edge][time] = self.approximate_gen_cost_function(
-                current_traffic_flow=self.link_traffic_flow[edge][time],
-                avg_traffic_flow=np.average(self.link_traffic_flow[edge][: time - 1]),
-                coeffs=coeffs, idx=idx
-            )
+        for idx, edge in enumerate(
+            edges := [
+                edge
+                for edge in self.network.edges(keys=True)
+                if edge[0][-1] != "*" and edge[1][-1] != "*"
+            ]
+        ):
+            if time == 0:
+                self.gen_cost[edge][time] = self.network.edges[edge]["free_flow_time"]
+            else:
+                self.gen_cost[edge][time] = self.approximate_gen_cost_function(
+                    current_traffic_flow=self.link_traffic_flow[edge][time],
+                    avg_traffic_flow=np.average(self.link_traffic_flow[edge][:time]),
+                    coeffs=coeffs,
+                    idx=idx,
+                )
 
     def approximate_gen_cost_function(
-        self, current_traffic_flow, avg_traffic_flow, coeffs, idx 
+        self, current_traffic_flow, avg_traffic_flow, coeffs, idx
     ):
 
         if coeffs is not None:
@@ -187,7 +200,8 @@ class AMoDEnv:
                     / math.factorial(i)
                 )
                 approximation += term
-
+            if np.isnan(approximation):
+                approximation = coeff[0]  # Fall back to first term if invalid
             return approximation
         else:
             return 1  # TODO: What is the default value?
@@ -213,7 +227,7 @@ class AMoDEnv:
         acc,
         origins,
         destinations,
-        truncate=5,
+        only_pickup_nearby=True,
     ):
         """
         Generate unique path IDs and their costs for IOD paths.
@@ -226,7 +240,7 @@ class AMoDEnv:
         - acc: Dictionary of vehicle counts at each node at each time step.
         - origins: List of origin nodes.
         - destinations: List of destination nodes.
-        - truncate: Maximum number of paths to generate for each IOD pair.
+        - only_pickup_nearby: Boolean flag to only consider nearby pickups. By nearby we mean only pick up pax at just one edge away from current location, as well as the current location itself.
 
         Returns:
         - iod_path_tuple: A list of tuples for IOD paths with path IDs and costs.
@@ -239,48 +253,91 @@ class AMoDEnv:
         cache = PathCacheManager(self.network)
         cache.load_cache()
         # Generate IOD paths with unique IDs
-        for i, o, d in product(self.acc.keys(), origins, destinations):
-            # print(f"Retrieving paths for {i}, {o}, {d} from cache.")
-            # io_paths = islice(
-            #     nx.all_simple_edge_paths(network, source=i, target=o), truncate
-            # )
-            # od_paths = islice(
-            #     nx.all_simple_edge_paths(network, source=o, target=d), truncate
-            # )
-            io_paths, od_paths = cache.get_cached_paths(i, o, d)
-
-            for io_path in io_paths:
-                for od_path in od_paths:
-                    # Combine IO and OD paths, excluding the duplicate occurrence of 'o'
-                    combined_path = io_path + od_path
-                    # Calculate the total cost of the combined path
-                    total_cost = sum([gen_cost[edge][time] for edge in combined_path])
-                    # Update tuples and dictionaries with the new path and its cost
-                    if (
-                        time in self.pax_demand
-                        and (o, d) in self.pax_demand[time]
-                        and self.pax_demand[time][(o, d)] != 0
-                    ):
-                        iod_path_tuple.append(
-                            (
-                                i,  # Vehicle current location
-                                o,  # Trip origin
-                                d,  # Trip destination
-                                path_id,  # Unique Path ID
-                                total_cost,  # Total cost of the path (generalized)
-                                self.pax_demand[time][(o, d)][0],  # Demand
-                                self.pax_demand[time][(o, d)][1],  # Price
+        if only_pickup_nearby:
+            for o, d in product(origins, destinations):
+                if o == d:
+                    continue
+                acc_candidates = [
+                    i for i in self.network.predecessors(o) if i[-1] != "*"
+                ]
+                acc_candidates.append(o)
+                for i in acc_candidates:
+                    io_paths, od_paths = cache.get_cached_paths(i, o, d)
+                    for io_path in io_paths:
+                        for od_path in od_paths:
+                            # Combine IO and OD paths, excluding the duplicate occurrence of 'o'
+                            combined_path = io_path + od_path
+                            # Calculate the total cost of the combined path
+                            total_cost = sum(
+                                [
+                                    gen_cost[edge][time]
+                                    for edge in combined_path
+                                    if not np.isnan(gen_cost[edge][time])
+                                ]
                             )
+                            # Update tuples and dictionaries with the new path and its cost
+                            if (
+                                time in self.pax_demand
+                                and (o, d) in self.pax_demand[time]
+                                and self.pax_demand[time][(o, d)] != 0
+                            ):
+                                iod_path_tuple.append(
+                                    (
+                                        i,  # Vehicle current location
+                                        o,  # Trip origin
+                                        d,  # Trip destination
+                                        path_id,  # Unique Path ID
+                                        total_cost,  # Total cost of the path (generalized)
+                                        self.pax_demand[time][(o, d)][0],  # Demand
+                                        self.pax_demand[time][(o, d)][1],  # Price
+                                    )
+                                )
+                            if (i, o, d) not in iod_path_dict:
+                                iod_path_dict[(i, o, d)] = {}
+                            iod_path_dict[path_id] = (
+                                tuple(combined_path),
+                                total_cost,
+                                (i, o, d),
+                            )
+                            path_id += 1
+        else:
+            for i, o, d in product(self.acc.keys(), origins, destinations):
+                if o == d:
+                    continue
+                io_paths, od_paths = cache.get_cached_paths(i, o, d)
+                for io_path in io_paths:
+                    for od_path in od_paths:
+                        # Combine IO and OD paths, excluding the duplicate occurrence of 'o'
+                        combined_path = io_path + od_path
+                        # Calculate the total cost of the combined path
+                        total_cost = sum(
+                            [gen_cost[edge][time] for edge in combined_path]
                         )
-                    if (i, o, d) not in iod_path_dict:
-                        iod_path_dict[(i, o, d)] = {}
-                    iod_path_dict[path_id] = (
-                        tuple(combined_path),
-                        total_cost,
-                        (i, o, d),
-                    )
-                    path_id += 1
-
+                        # Update tuples and dictionaries with the new path and its cost
+                        if (
+                            time in self.pax_demand
+                            and (o, d) in self.pax_demand[time]
+                            and self.pax_demand[time][(o, d)] != 0
+                        ):
+                            iod_path_tuple.append(
+                                (
+                                    i,  # Vehicle current location
+                                    o,  # Trip origin
+                                    d,  # Trip destination
+                                    path_id,  # Unique Path ID
+                                    total_cost,  # Total cost of the path (generalized)
+                                    self.pax_demand[time][(o, d)][0],  # Demand
+                                    self.pax_demand[time][(o, d)][1],  # Price
+                                )
+                            )
+                        if (i, o, d) not in iod_path_dict:
+                            iod_path_dict[(i, o, d)] = {}
+                        iod_path_dict[path_id] = (
+                            tuple(combined_path),
+                            total_cost,
+                            (i, o, d),
+                        )
+                        path_id += 1
         return iod_path_tuple, iod_path_dict
 
     def format_for_opl(self, value):
@@ -416,20 +473,20 @@ class AMoDEnv:
         # Obtain link demands from path demands
         # if self.link_demands is None:
         self.link_demands = {
-            edge: {time: 0 for time in range(self.total_time // self.time_step)}
+            edge: {time: 0 for time in range(self.total_time // self.time_step + 1)}
             for edge in self.network.edges(keys=True)
         }
         for pid, flow in iod_path_demands.items():
             self.path_demands[paxPathDict[pid][0]][t + delta_t] += flow
-            path = paxPathDict[pid][0]
             for edge in self.network.in_edges(paxPathDict[pid][0][0][0], keys=True):
                 if self.network.edges[edge]["type"] == "origin":
-                    path.insert(0, edge)
+                    o_edge = edge
             for edge in self.network.out_edges(paxPathDict[pid][0][-1][1], keys=True):
                 if self.network.edges[edge]["type"] == "destination":
-                    path.append(edge)
-            for i in range(len(path)-1):
-                self.node_transition_demand[path[i][1]][path[i]][path[i+1]][t] += flow
+                    d_edge = edge
+            path = (o_edge,) + paxPathDict[pid][0] + (d_edge,)
+            for i in range(len(path) - 1):
+                self.node_transition_demand[path[i][1]][path[i]][path[i + 1]][t] += flow
             path_travel_time = 0
             for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
                 self.link_demands[(edge_start, edge_end, edge_key)][t] += flow
@@ -454,14 +511,15 @@ class AMoDEnv:
             )
             assert iod_path_demands[pid] < self.acc[i][t + 1] + 1e-3
             self.served_demand[o, d][t] = iod_path_demands[pid]
-            self.pax_flow[o, d][t + path_travel_time] = iod_path_demands[pid]
+            self.pax_flow[o, d][int(t + path_travel_time)] = iod_path_demands[pid]
             self.info["operating_cost"] += (
                 path_travel_time * self.beta * iod_path_demands[pid]
             )
             self.acc[i][t + 1] -= iod_path_demands[pid]
+            self.acc[o][int(t + path_travel_time)] += iod_path_demands[pid]
             self.info["served_demand"] += self.served_demand[o, d][t]
-            self.dacc[d][t + path_travel_time] += self.pax_flow[o, d][
-                t + path_travel_time
+            self.dacc[d][int(t + path_travel_time)] += self.pax_flow[o, d][
+                int(t + path_travel_time)
             ]
             self.reward += iod_path_demands[pid] * (
                 self.pax_demand[t][(o, d)][1] - self.beta * iod_path_demands[pid]
@@ -488,7 +546,11 @@ class AMoDEnv:
         self.rebAction = rebAction
         # Rebalancing
         for idx, k in enumerate(
-            [edge for edge in self.network.edges(keys=True, data=False) if edge[0][-1] != '*' and edge[1][-1] != '*']
+            [
+                edge
+                for edge in self.network.edges(keys=True, data=False)
+                if edge[0][-1] != "*" and edge[1][-1] != "*"
+            ]
         ):
             edge_start, edge_end, edge_key = k
             self.rebAction[k] = min(self.acc[edge_start][t + 1], rebAction[k])
@@ -528,20 +590,20 @@ class AMoDEnv:
             if (edge_start, edge_end, edge_key) in self.reb_flow and t in self.reb_flow[
                 edge_start, edge_end, edge_key
             ]:
-                self.acc[edge_end][t + 1] += self.reb_flow[
-                    edge_start, edge_end, edge_key
-                ][t]
-            if (
-                edge_start,
-                edge_end,
-                edge_key,
-            ) in self.link_demands and t in self.link_demands[
-                edge_start, edge_end, edge_key
-            ]:
-                self.acc[edge_end][t + 1] += self.link_demands[
-                    edge_start, edge_end, edge_key
-                ][t]
-                # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
+                self.acc[edge_end][
+                    t + self.link_mean_travel_time[(edge_start, edge_end, edge_key)][t]
+                ] += self.reb_flow[edge_start, edge_end, edge_key][t]
+            # if (
+            #     edge_start,
+            #     edge_end,
+            #     edge_key,
+            # ) in self.link_demands and t in self.link_demands[
+            #     edge_start, edge_end, edge_key
+            # ]:
+            #     self.acc[edge_end][t + self.link_mean_travel_time[(edge_start, edge_end, edge_key)[t]]] += self.link_demands[
+            #         edge_start, edge_end, edge_key
+            #     ][t]
+            #     # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
 
         # self.time += 1
         self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
@@ -552,7 +614,10 @@ class AMoDEnv:
         t = self.time
         delta_t = self.time_step
         # Do a step in LTM
-        for node in self.network.nodes:
+        for node in sorted(
+            list(self.network.nodes),
+            key=lambda x: (not x.endswith("*"), x.endswith("**")),
+        ):
             # For each node, calculate the sending flow and receiving flow of its connected edges
             for edge in set(
                 out_edges := self.network.out_edges(nbunch=node, keys=True)
@@ -679,30 +744,36 @@ class AMoDEnv:
                 )
                 for in_edge in in_edges:
                     for out_edge in out_edges:
-                        p = (
-                            self.node_transition_demand[node][in_edge][out_edge][t]
-                            / sum_inout
-                        )
-                        transition_flow = p * min(
-                            min(
+                        if sum_inout > 1e-6:
+                            p = (
+                                self.node_transition_demand[node][in_edge][out_edge][t]
+                                / sum_inout
+                            )
+                        else:
+                            p = 0
+                        if p > 1e-6:
+                            summ = sum(
                                 [
-                                    self.receiving_flow[out_edge][t]
-                                    * self.sending_flow[in_edge][t]
-                                    / (
-                                        sum(
-                                            [
-                                                self.node_transition_demand[node][i][
-                                                    out_edge
-                                                ]
-                                                * self.sending_flow[i][t]
-                                                for i in in_edges
-                                            ]
-                                        )
-                                    )
+                                    self.node_transition_demand[node][i][out_edge][t]
+                                    * self.sending_flow[i][t]
+                                    for i in in_edges
                                 ]
-                            ),
-                            self.sending_flow[in_edge][t],
-                        )
+                            )
+                            if summ > 1e-6:
+                                transition_flow = p * min(
+                                    min(
+                                        [
+                                            self.receiving_flow[out_edge][t]
+                                            * self.sending_flow[in_edge][t]
+                                            / summ
+                                        ]
+                                    ),
+                                    self.sending_flow[in_edge][t],
+                                )
+                            else:
+                                transition_flow = 0
+                        else:
+                            transition_flow = 0
                         self.cvn[out_edge][t + delta_t][0] = (
                             self.cvn[out_edge][t][0] + transition_flow
                         )
@@ -736,18 +807,23 @@ class AMoDEnv:
         if self.cvn[edge][time][0] == 0:
             return self.network.edges[edge]["free_flow_time"]
         else:
-            # Initialize x to be the time step just before the given time
-            x = time - 1
-            # Loop backwards to find the x such that cvn[edge][x][0] == cvn[edge][time][1]
-            while x >= 0:
-                if self.cvn[edge][x][0] == self.cvn[edge][time][1]:
-                    break  # Found the desired time x
-                x -= 1
-            # If x is found within the valid range, calculate and return the travel time
-            if x >= 0:
-                return time - x
-            else:
-                raise ValueError("No suitable x found within the valid time range.")
+            # # Initialize x to be the time step just before the given time
+            # x = time - 1
+            # # Loop backwards to find the x such that cvn[edge][x][0] == cvn[edge][time][1]
+            # while x >= 0:
+            #     if self.cvn[edge][x][0] == self.cvn[edge][time][1]:
+            #         break  # Found the desired time x
+            #     x -= 1
+            # # If x is found within the valid range, calculate and return the travel time
+            # if x >= 0:
+            #     return time - x
+            # else:
+            #     raise ValueError("No suitable x found within the valid time range.")
+            values = np.array(
+                [self.cvn[edge][x][0] for x in range(len(self.cvn[edge]))]
+            )
+            n = np.argmin(np.abs(values - self.cvn[edge][time][1]))
+            return time - n
 
     def get_link_traffic_flow(self, edge, time):
         return self.cvn[edge][time][0] - self.cvn[edge][time][1]
@@ -769,7 +845,7 @@ class Scenario:
         json_hr=9,
         json_tstep=2,
         json_regions=None,
-        ffs=0.2,
+        ffs=60,
     ):
         """
         `Scenario` class for AMoD environment. Does all the network loading/generating from sample network/json file.
@@ -819,7 +895,7 @@ class Scenario:
         self.initial_travel_time = {
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
-        self.ffs = ffs
+        self.ffs = ffs * 10
 
     def _load_sample_network(self, name, demand_scale=(0, 5), price_scale=(10, 30)):
         """
@@ -912,6 +988,7 @@ class Scenario:
                     "type": "normal",  # Read edges are all normal, will generate dummy edges later, and their type would be "origin" or "destination"
                     "link_type": int(parts[9]),
                     "ffs": float(parts[3])
+                    * 10  # TODO: Subject to change
                     / (float(parts[4]) / 60),  # free flow speed, in km/h
                     "q_max": float(parts[2]),  # capacity (flow)
                     "w": backward_speed,  # backward speed, here is is arbitrary
@@ -955,9 +1032,8 @@ class Scenario:
         return demand, origins, destinations, od_pairs
 
     def _distribute_temporal_demand(
-        self, base_demand, price_scale, peak_time=30, std_dev=10, scale=0.1
+        self, base_demand, price_scale, peak_time=30, std_dev=10, scale=0.005
     ):
-        # total_demand = sum(sum(d.values()) for d in base_demand.values())
         time_periods = range(60)  # Time steps from 0 to 59
         pax_demand = {time: {} for time in time_periods}
         for time in time_periods:
@@ -982,7 +1058,7 @@ class Scenario:
         # Example using a simple normal distribution for temporal variation
         return np.exp(-0.5 * ((time - peak_time) / std_dev) ** 2)
 
-    def _generate_init_acc(self, network, acc_scale: tuple = (0, 100)):
+    def _generate_init_acc(self, network, acc_scale: tuple = (0, 30)):
         accs = {
             i: {"accInit": random.randint(acc_scale[0], acc_scale[1])}
             for i in network.nodes
@@ -1015,7 +1091,7 @@ class Scenario:
             network.add_node(d + "**")
             network.add_edge(
                 d,
-                d + "*",
+                d + "**",
                 length=dummy_length,
                 q_max=dummy_q_max,
                 k_j=dummy_k_j,
