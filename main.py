@@ -5,6 +5,7 @@ import argparse
 from tqdm import trange
 import numpy as np
 import torch
+import time
 
 from src.envs.amod_env_ltm import Scenario, AMoDEnv as AMoD
 from src.algos.a2c_gnn import A2C
@@ -116,10 +117,15 @@ if not args.test:
         episode_served_demand = 0
         episode_rebalancing_cost = 0
         for step in range(T):
+            # Init timer
+            start = time.time()
+            print(f"Step {step}")
             env.update_traffic_flow_and_travel_time(time=step)
             if args.estimate_bpr:
                 env.eval_network_gen_cost(time=step, coeffs=taylor_params)
             # take matching step (Step 1 in paper)
+            print(f"update took {time.time()-start} seconds")
+            start = time.time()
             obs, paxreward, done, info = env.pax_step(
                 CPLEXPATH=args.cplexpath,
                 PATH="scenario_nyc4",
@@ -127,19 +133,45 @@ if not args.test:
             )
             episode_reward += paxreward
             # use GNN-RL policy (Step 2 in paper)
+            print(f"pax step took {time.time()-start} seconds")
+            start = time.time()
             if not args.estimate_bpr:
                 action_rl = model.select_action(obs)
             else:
                 action_rl, taylor_params = model.select_action(obs)
             # transform sample from Dirichlet into actual vehicle counts (i.e. (x1*x2*..*xn)*num_vehicles)
+            acc_count = dictsum(env.acc, env.time + 1)
+            # desiredAcc = {
+            #     env.region[i]: int(action_rl[i] * dictsum(env.acc, env.time + 1))
+            #     for i in range(len(env.region))
+            # }
             desiredAcc = {
-                env.region[i]: int(action_rl[i] * dictsum(env.acc, env.time + 1))
-                for i in range(len(env.region))
+                env.region[iidx]: int(
+                    sum(
+                        [
+                            action_rl[idx]
+                            for idx, j in enumerate(
+                                [
+                                    edge
+                                    for edge in env.network.edges
+                                    if edge[0][-1] != "*" and edge[1][-1] != "*"
+                                ]
+                            )
+                            if j[1] == i
+                        ]
+                    )
+                    * acc_count
+                )
+                for iidx, i in enumerate(env.region)
             }
             if args.estimate_bpr:
                 env.eval_network_gen_cost(time=step, coeffs=taylor_params)
             # solve minimum rebalancing distance problem (Step 3 in paper)
-            rebAction = solveRebFlow(env, "scenario_nyc4", desiredAcc, env.gen_cost, args.cplexpath)
+            print(f"select action took {time.time()-start} seconds")
+            start = time.time()
+            rebAction = solveRebFlow(
+                env, "scenario_nyc4", desiredAcc, env.gen_cost, args.cplexpath
+            )
             # Take action in environment
             new_obs, rebreward, done, info = env.reb_step(rebAction)
             episode_reward += rebreward
@@ -148,7 +180,11 @@ if not args.test:
             # track performance over episode
             episode_served_demand += info["served_demand"]
             episode_rebalancing_cost += info["rebalancing_cost"]
+            print(f"reb step took {time.time()-start} seconds")
+            start = time.time()
             env.ltm_step()
+            print(f"ltm step took {time.time()-start} seconds")
+            start = time.time()
             # stop episode if terminating conditions are met
             if done:
                 break

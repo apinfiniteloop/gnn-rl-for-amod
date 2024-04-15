@@ -465,8 +465,8 @@ class AMoDEnv:
         # Obtain path demands from i to o to d, traversing path_id
         # iod_path_demands = {pid: [flow for _ in range(self.total_time // self.time_step)] if flow > 1e-6 else [0 for _ in range(self.total_time // self.time_step)] for (_, _, _, pid), flow in paxAction.items()}
         iod_path_demands = {
-            pid: flow if flow > 1e-6 else 0
-            for (_, _, _, pid), flow in paxAction.items()
+            pid: flow
+            for (_, _, _, pid), flow in paxAction.items() if flow > 1e-6
         }
         for pid in iod_path_demands.keys():
             self.path_demands[paxPathDict[pid][0]][t] = iod_path_demands[pid]
@@ -522,7 +522,7 @@ class AMoDEnv:
                 int(t + path_travel_time)
             ]
             self.reward += iod_path_demands[pid] * (
-                self.pax_demand[t][(o, d)][1] - self.beta * iod_path_demands[pid]
+                self.pax_demand[t][(o, d)][1] - self.beta * path_travel_time
             )
             self.info["revenue"] += (
                 iod_path_demands[pid] * self.pax_demand[t][(o, d)][1]
