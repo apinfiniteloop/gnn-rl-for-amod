@@ -3,6 +3,7 @@ import subprocess
 import json
 import random
 import math
+# import time as tm
 from copy import deepcopy
 from itertools import product
 from collections import defaultdict
@@ -248,7 +249,7 @@ class AMoDEnv:
         - iod_path_tuple: A list of tuples for IOD paths with path IDs and costs.
         - iod_path_dict: A dictionary of dictionaries for IOD paths with path IDs and costs.
         """
-
+        # start = tm.time()
         path_id = 0
         iod_path_tuple = []
         iod_path_dict = {}  # iod_path_dict[(i,o,d)][path_id] = (path, cost)
@@ -258,7 +259,7 @@ class AMoDEnv:
         cache = self.cache
         # Generate IOD paths with unique IDs
         if only_pickup_nearby:
-            for o, d in product([od[0] for od in pax_demand[time].keys()], [od[1] for od in pax_demand[time].keys()]):
+            for o, d in pax_demand[time].keys():
                 if o == d:
                     continue
                 acc_candidates = [
@@ -273,11 +274,9 @@ class AMoDEnv:
                             combined_path = io_path + od_path
                             # Calculate the total cost of the combined path
                             total_cost = sum(
-                                [
                                     gen_cost[edge][time]
                                     for edge in combined_path
                                     if not np.isnan(gen_cost[edge][time])
-                                ]
                             )
                             # Update tuples and dictionaries with the new path and its cost
                             if (
@@ -342,6 +341,7 @@ class AMoDEnv:
                             (i, o, d),
                         )
                         path_id += 1
+        # print(f"Time taken to generate IOD paths: {tm.time() - start} seconds.")
         return iod_path_tuple, iod_path_dict
 
     def format_for_opl(self, value):
@@ -360,24 +360,7 @@ class AMoDEnv:
             return str(value)
 
     def matching(self, CPLEXPATH=None, PATH="", platform="win"):
-        """
-
-        Matching function for AMoD environment. Uses CPLEX to solve the optimization problem.
-
-        Parameters:
-
-        `CPLEXPATH`: str, path to CPLEX executable
-
-        `PATH`: str, path to store CPLEX output
-        """
         t = self.time
-        # demand_attr = [
-        #     (i, j, self.pax_demand[t][(i, j)][0], self.pax_demand[t][(i, j)][1])
-        #     for i, j in product(self.origins, self.destinations)
-        #     if t in self.pax_demand.keys()
-        #     and (i, j) in self.pax_demand[t].keys()
-        #     and self.pax_demand[t][(i, j)][0] > 1e-6
-        # ]  # Demand attributes, (origin, destination, demand, price)
         acc_tuple = [
             (i, self.acc[i][t + 1]) for i in self.acc
         ]  # Accumulation attributes
@@ -601,7 +584,9 @@ class AMoDEnv:
             self.acc[node][t + 1] -= total_outflow
             for idx, edge in enumerate(target_outflow.keys()):
                 actual_outflow = ratios[edge] * total_outflow
-                self.reb_flow[edge][t+self.link_mean_travel_time[edge][t]] = actual_outflow
+                self.reb_flow[edge][
+                    t + self.link_mean_travel_time[edge][t]
+                ] = actual_outflow
                 self.dacc[edge[1]][
                     t + self.link_mean_travel_time[edge][t]
                 ] += actual_outflow
@@ -1067,7 +1052,7 @@ class Scenario:
         return demand, origins, destinations, od_pairs
 
     def _distribute_temporal_demand(
-        self, base_demand, price_scale, peak_time=30, std_dev=10, scale=0.005
+        self, base_demand, price_scale, peak_time=30, std_dev=20, scale=0.01
     ):
         time_periods = range(60)  # Time steps from 0 to 59
         pax_demand = {time: {} for time in time_periods}
