@@ -122,6 +122,8 @@ class AMoDEnv:
             ["revenue", "served_demand", "rebalancing_cost", "operating_cost"], 0
         )
         self.reward = 0
+        self.cache = PathCacheManager(self.network)
+        self.cache.load_cache()
 
     def cache_paths(self):
         cache = PathCacheManager(self.network)
@@ -250,11 +252,13 @@ class AMoDEnv:
         path_id = 0
         iod_path_tuple = []
         iod_path_dict = {}  # iod_path_dict[(i,o,d)][path_id] = (path, cost)
-        cache = PathCacheManager(self.network)
-        cache.load_cache()
+        if self.cache is None:
+            self.cache = PathCacheManager(self.network)
+            self.cache.load_cache()
+        cache = self.cache
         # Generate IOD paths with unique IDs
         if only_pickup_nearby:
-            for o, d in product(origins, destinations):
+            for o, d in product([od[0] for od in pax_demand[time].keys()], [od[1] for od in pax_demand[time].keys()]):
                 if o == d:
                     continue
                 acc_candidates = [

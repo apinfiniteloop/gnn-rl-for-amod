@@ -275,7 +275,8 @@ class A2C(nn.Module):
         if (
             a_out.shape[1] > self.D
         ):  # Check if there are more outputs beyond Dirichlet parameters
-            taylor_params = a_out[:, self.D :]  # Extract Taylor series parameters
+            taylor_params = F.softplus(a_out[:, self.D :]) + jitter
+            # Extract Taylor series parameters
         else:
             taylor_params = None  # Or an appropriate default value indicating no Taylor series parameters
 
@@ -291,11 +292,13 @@ class A2C(nn.Module):
         concentration, taylor_params, value = self.forward(obs)
 
         m = Dirichlet(concentration)
+        n = Dirichlet(taylor_params)
 
         action = m.sample()
+        taylor_action = n.sample()
         self.saved_actions.append(
-            SavedAction(m.log_prob(action), value)
-        )  # 生成多元正态分布，两个log_prob相乘
+            SavedAction(m.log_prob(action) + n.log_prob(taylor_action), value)
+        )
         if taylor_params is None:
             return list(action.cpu().numpy())
         else:

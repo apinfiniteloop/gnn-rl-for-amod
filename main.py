@@ -62,7 +62,7 @@ parser.add_argument(
 parser.add_argument(
     "--max_episodes",
     type=int,
-    default=16000,
+    default=500,
     metavar="N",
     help="number of episodes to train agent (default: 16k)",
 )
@@ -119,12 +119,12 @@ if not args.test:
         for step in range(T):
             # Init timer
             start = time.time()
-            print(f"Step {step}")
+            # print(f"Step {step}")
             env.update_traffic_flow_and_travel_time(time=step)
             if args.estimate_bpr:
                 env.eval_network_gen_cost(time=step, coeffs=taylor_params)
             # take matching step (Step 1 in paper)
-            print(f"update took {time.time()-start} seconds")
+            # print(f"update took {time.time()-start} seconds")
             start = time.time()
             obs, paxreward, done, info = env.pax_step(
                 CPLEXPATH=args.cplexpath,
@@ -133,7 +133,7 @@ if not args.test:
             )
             episode_reward += paxreward
             # use GNN-RL policy (Step 2 in paper)
-            print(f"pax step took {time.time()-start} seconds")
+            # print(f"pax step took {time.time()-start} seconds")
             start = time.time()
             if not args.estimate_bpr:
                 action_rl = model.select_action(obs)
@@ -167,7 +167,7 @@ if not args.test:
             if args.estimate_bpr:
                 env.eval_network_gen_cost(time=step, coeffs=taylor_params)
             # solve minimum rebalancing distance problem (Step 3 in paper)
-            print(f"select action took {time.time()-start} seconds")
+            # print(f"select action took {time.time()-start} seconds")
             start = time.time()
             rebAction = solveRebFlow(
                 env, "scenario_nyc4", desiredAcc, env.gen_cost, args.cplexpath
@@ -180,10 +180,10 @@ if not args.test:
             # track performance over episode
             episode_served_demand += info["served_demand"]
             episode_rebalancing_cost += info["rebalancing_cost"]
-            print(f"reb step took {time.time()-start} seconds")
+            # print(f"reb step took {time.time()-start} seconds")
             start = time.time()
             env.ltm_step()
-            print(f"ltm step took {time.time()-start} seconds")
+            # print(f"ltm step took {time.time()-start} seconds")
             start = time.time()
             # stop episode if terminating conditions are met
             if done:
