@@ -112,6 +112,21 @@ class AMoDEnv:
                 for node in self.network.nodes
             }
         )
+        self.pending_node_transition_demand = defaultdict(
+            EdgeKeyDict
+        )  # Node Transition Demand, for storing demand of edge i to edge j, forall i in in_edges and j in out_edges
+        self.pending_node_transition_demand = (
+            {  # Initialize node transition demand for all nodes
+                node: {
+                    i: {
+                        j: {t: 0 for t in range(self.total_time + 1)}
+                        for j in self.network.out_edges(node, keys=True)
+                    }
+                    for i in self.network.in_edges(node, keys=True)
+                }
+                for node in self.network.nodes
+            }
+        )
         self.link_mean_travel_time = defaultdict(EdgeKeyDict)
         self.link_mean_travel_time = {
             tuple(edge): {t: 0 for t in range(self.total_time + 1)}
