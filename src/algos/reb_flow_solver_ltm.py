@@ -29,53 +29,53 @@ def solveRebFlow(env, res_path, desiredAcc, gen_cost, CPLEXPATH):
         file.write("edgeAttr=" + mat2str(edgeAttr) + ";\r\n")
         file.write("accInitTuple=" + mat2str(accTuple) + ";\r\n")
         file.write("accRLTuple=" + mat2str(accRLTuple) + ";\r\n")
-    modfile = modPath + "minRebDistRebOnly_path.mod"
+    # modfile = modPath + "minRebDistRebOnly_path.mod"
     modfile_no_relax = modPath + "minRebDistRebOnly_path_no_relax.mod"
     if CPLEXPATH is None:
         CPLEXPATH = "/opt/ibm/ILOG/CPLEX_Studio128/opl/bin/x86-64_linux/"
     my_env = os.environ.copy()
     my_env["LD_LIBRARY_PATH"] = CPLEXPATH
     out_file = OPTPath + f"out_{t}.dat"
-    try:
-        with open(out_file, "w") as output_f:
-            subprocess.check_call(
-                [CPLEXPATH + "oplrun", modfile_no_relax, datafile],
-                stdout=output_f,
-                env=my_env,
-            )
-        output_f.close()
+    # try:
+    with open(out_file, "w") as output_f:
+        subprocess.check_call(
+            [CPLEXPATH + "oplrun", modfile_no_relax, datafile],
+            stdout=output_f,
+            env=my_env,
+        )
+    output_f.close()
 
-        # 3. collect results from file
-        flow = defaultdict(float)
-        with open(resfile, "r", encoding="utf8") as file:
-            for row in file:
-                item = row.strip().strip(";").split("=")
-                if item[0] == "flow":
-                    values = item[1].strip(")]").strip("[(").split(")(")
-                    for v in values:
-                        if len(v) == 0:
-                            continue
-                        i, j, k, f = v.split(",")
-                        flow[i, j, k] = float(f)
-    except ValueError:
-        with open(out_file, "w") as output_f:
-            subprocess.check_call(
-                [CPLEXPATH + "oplrun", modfile, datafile],
-                stdout=output_f,
-                env=my_env,
-            )
-        output_f.close()
+    # 3. collect results from file
+    flow = defaultdict(float)
+    with open(resfile, "r", encoding="utf8") as file:
+        for row in file:
+            item = row.strip().strip(";").split("=")
+            if item[0] == "flow":
+                values = item[1].strip(")]").strip("[(").split(")(")
+                for v in values:
+                    if len(v) == 0:
+                        continue
+                    i, j, k, f = v.split(",")
+                    flow[i, j, int(k)] = float(f)
+    # except ValueError:
+    #     with open(out_file, "w") as output_f:
+    #         subprocess.check_call(
+    #             [CPLEXPATH + "oplrun", modfile, datafile],
+    #             stdout=output_f,
+    #             env=my_env,
+    #         )
+    #     output_f.close()
 
-        # 3. collect results from file
-        flow = defaultdict(float)
-        with open(resfile, "r", encoding="utf8") as file:
-            for row in file:
-                item = row.strip().strip(";").split("=")
-                if item[0] == "flow":
-                    values = item[1].strip(")]").strip("[(").split(")(")
-                    for v in values:
-                        if len(v) == 0:
-                            continue
-                        i, j, k, f = v.split(",")
-                        flow[i, j, k] = float(f)
+    #     # 3. collect results from file
+    #     flow = defaultdict(float)
+    #     with open(resfile, "r", encoding="utf8") as file:
+    #         for row in file:
+    #             item = row.strip().strip(";").split("=")
+    #             if item[0] == "flow":
+    #                 values = item[1].strip(")]").strip("[(").split(")(")
+    #                 for v in values:
+    #                     if len(v) == 0:
+    #                         continue
+    #                     i, j, k, f = v.split(",")
+    #                     flow[i, j, k] = float(f)
     return flow

@@ -465,8 +465,7 @@ class AMoDEnv:
         # Obtain path demands from i to o to d, traversing path_id
         # iod_path_demands = {pid: [flow for _ in range(self.total_time // self.time_step)] if flow > 1e-6 else [0 for _ in range(self.total_time // self.time_step)] for (_, _, _, pid), flow in paxAction.items()}
         iod_path_demands = {
-            pid: flow
-            for (_, _, _, pid), flow in paxAction.items() if flow > 1e-6
+            pid: flow for (_, _, _, pid), flow in paxAction.items() if flow > 1e-6
         }
         for pid in iod_path_demands.keys():
             self.path_demands[paxPathDict[pid][0]][t] = iod_path_demands[pid]
@@ -510,8 +509,8 @@ class AMoDEnv:
                 paxPathDict[pid][2][2],
             )
             assert iod_path_demands[pid] < self.acc[i][t + 1] + 1e-3
-            self.served_demand[o, d][t] = iod_path_demands[pid]
-            self.pax_flow[o, d][int(t + path_travel_time)] = iod_path_demands[pid]
+            self.served_demand[o, d][t] += iod_path_demands[pid]
+            self.pax_flow[o, d][int(t + path_travel_time)] += iod_path_demands[pid]
             self.info["operating_cost"] += (
                 path_travel_time * self.beta * iod_path_demands[pid]
             )
@@ -545,39 +544,71 @@ class AMoDEnv:
         self.reward = 0
         self.rebAction = rebAction
         # Rebalancing
-        for idx, k in enumerate(
-            [
-                edge
-                for edge in self.network.edges(keys=True, data=False)
-                if edge[0][-1] != "*" and edge[1][-1] != "*"
-            ]
+        # for idx, k in enumerate(
+        #     [
+        #         edge
+        #         for edge in self.network.edges(keys=True, data=False)
+        #         if edge[0][-1] != "*" and edge[1][-1] != "*"
+        #     ]
+        # ):
+        #     edge_start, edge_end, edge_key = k
+        #     self.rebAction[k] = min(self.acc[edge_start][t + 1], rebAction[k])
+        #     self.reb_flow[edge_start, edge_end, edge_key][
+        #         t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
+        #     ] = self.rebAction[k]
+        #     self.acc[edge_start][t + 1] -= self.rebAction[k]
+        #     self.dacc[edge_end][
+        #         t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
+        #     ] += self.reb_flow[edge_start, edge_end, edge_key][
+        #         t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
+        #     ]
+        #     self.info["rebalancing_cost"] += (
+        #         self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
+        #         * self.beta
+        #         * self.rebAction[k]
+        #     )
+        #     self.info["operating_cost"] += (
+        #         self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
+        #         * self.beta
+        #         * self.rebAction[k]
+        #     )
+        #     self.reward -= (
+        #         self.rebAction[k]
+        #         * self.beta
+        #         * self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
+        #     )
+        for idx, node in enumerate(
+            [node for node in self.network.nodes if node[-1] != "*"]
         ):
-            edge_start, edge_end, edge_key = k
-            self.rebAction[k] = min(self.acc[edge_start][t + 1], rebAction[k])
-            self.reb_flow[edge_start, edge_end, edge_key][
-                t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-            ] = self.rebAction[k]
-            self.acc[edge_start][t + 1] -= self.rebAction[k]
-            self.dacc[edge_end][
-                t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-            ] += self.reb_flow[edge_start, edge_end, edge_key][
-                t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-            ]
-            self.info["rebalancing_cost"] += (
-                self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-                * self.beta
-                * self.rebAction[k]
-            )
-            self.info["operating_cost"] += (
-                self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-                * self.beta
-                * self.rebAction[k]
-            )
-            self.reward -= (
-                self.rebAction[k]
-                * self.beta
-                * self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-            )
+            target_outflow = {
+                edge: rebAction[edge]
+                for edge in self.network.out_edges(node, keys=True)
+                if edge[0][-1] != "*" and edge[1][-1] != "*"
+            }
+            total_outflow = sum(target_outflow.values())
+            if total_outflow == 0:
+                continue
+            ratios = {
+                edge: target_outflow[edge] / total_outflow
+                for edge in target_outflow.keys()
+            }
+            if total_outflow > self.acc[node][t + 1]:
+                total_outflow = self.acc[node][t + 1]
+            self.acc[node][t + 1] -= total_outflow
+            for idx, edge in enumerate(target_outflow.keys()):
+                actual_outflow = ratios[edge] * total_outflow
+                self.reb_flow[edge][t+self.link_mean_travel_time[edge][t]] = actual_outflow
+                self.dacc[edge[1]][
+                    t + self.link_mean_travel_time[edge][t]
+                ] += actual_outflow
+                self.info["rebalancing_cost"] += (
+                    self.link_mean_travel_time[edge][t] * self.beta * actual_outflow
+                )
+                self.info["operating_cost"] += (
+                    self.link_mean_travel_time[edge][t] * self.beta * actual_outflow
+                )
+                self.reward -= actual_outflow * self.link_mean_travel_time[edge][t]
+
         # arrival for the next time step, executed in the last state of a time step
         # this makes the code slightly different from the previous version, where the following codes are executed between matching and rebalancing
         for k, (edge_start, edge_end, edge_key) in enumerate(
@@ -1027,7 +1058,7 @@ class Scenario:
                         dest, flow = part.split(":")
                         origins.add(origin)
                         destinations.add(str(dest.strip()))
-                        od_pairs.add((origin, str(dest.strip)))
+                        od_pairs.add((origin, str(dest.strip())))
                         demand[origin][str(dest.strip())] = float(flow.strip())
         return demand, origins, destinations, od_pairs
 
