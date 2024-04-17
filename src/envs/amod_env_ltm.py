@@ -3,6 +3,7 @@ import subprocess
 import json
 import random
 import math
+
 # import time as tm
 from copy import deepcopy
 from itertools import product
@@ -46,7 +47,11 @@ class AMoDEnv:
         # self.path_demands = scenario.path_demands
         # self.link_demands = scenario.link_demands
         self.path_demands = defaultdict(lambda: defaultdict(int))
-        self.link_demands = defaultdict(dict)
+        # self.link_demands = defaultdict(dict)
+        self.link_demands = {
+            edge: {time: 0 for time in range(self.total_time // self.time_step + 1)}
+            for edge in self.network.edges(keys=True)
+        }
         self.served_demand = defaultdict(dict)
         for o, d in self.od_pairs:
             self.served_demand[o, d] = defaultdict(float)
@@ -137,13 +142,15 @@ class AMoDEnv:
         except KeyError:
             ffs = self.ffs  # Default ffs value
         # Source nodes and destination nodes don't have 'w' and 'k_j' attribute.
-        if t + delta_t - edge_attrib["length"] / ffs < 0:
+        if t + delta_t - 60 * edge_attrib["length"] / ffs < 0:  # length/ffs is hour.
             return min(
                 self.cvn[tuple(edge)][0][0] - self.cvn[tuple(edge)][t][1],
                 edge_attrib["q_max"],
             )
         return min(
-            self.cvn[tuple(edge)][int(t + delta_t - edge_attrib["length"] / ffs)][0]
+            self.cvn[tuple(edge)][int(t + delta_t - 60 * edge_attrib["length"] / ffs)][
+                0
+            ]
             - self.cvn[tuple(edge)][t][1],
             edge_attrib["q_max"] * delta_t,
         )
@@ -274,9 +281,9 @@ class AMoDEnv:
                             combined_path = io_path + od_path
                             # Calculate the total cost of the combined path
                             total_cost = sum(
-                                    gen_cost[edge][time]
-                                    for edge in combined_path
-                                    if not np.isnan(gen_cost[edge][time])
+                                gen_cost[edge][time]
+                                for edge in combined_path
+                                if not np.isnan(gen_cost[edge][time])
                             )
                             # Update tuples and dictionaries with the new path and its cost
                             if (
@@ -458,10 +465,6 @@ class AMoDEnv:
             self.path_demands[paxPathDict[pid][0]][t] = iod_path_demands[pid]
         # Obtain link demands from path demands
         # if self.link_demands is None:
-        self.link_demands = {
-            edge: {time: 0 for time in range(self.total_time // self.time_step + 1)}
-            for edge in self.network.edges(keys=True)
-        }
         for pid, flow in iod_path_demands.items():
             self.path_demands[paxPathDict[pid][0]][t + delta_t] += flow
             for edge in self.network.in_edges(paxPathDict[pid][0][0][0], keys=True):
@@ -915,7 +918,7 @@ class Scenario:
         self.initial_travel_time = {
             edge: self.G.edges[edge]["length"] / ffs for edge in self.G.edges(keys=True)
         }
-        self.ffs = ffs * 10
+        self.ffs = ffs
 
     def _load_sample_network(self, name, demand_scale=(0, 5), price_scale=(10, 30)):
         """
@@ -981,7 +984,7 @@ class Scenario:
         # Initialize the passenger demand dictionary for each time step
         return {time: {} for time in range(60)}
 
-    def _read_network_sioux_falls(self, file_path, backward_speed=15):
+    def _read_network_sioux_falls(self, file_path, backward_speed=10):
         with open(file_path, "r") as file:
             lines = file.readlines()
 
@@ -1008,7 +1011,6 @@ class Scenario:
                     "type": "normal",  # Read edges are all normal, will generate dummy edges later, and their type would be "origin" or "destination"
                     "link_type": int(parts[9]),
                     "ffs": float(parts[3])
-                    * 10  # TODO: Subject to change
                     / (float(parts[4]) / 60),  # free flow speed, in km/h
                     "q_max": float(parts[2]),  # capacity (flow)
                     "w": backward_speed,  # backward speed, here is is arbitrary
