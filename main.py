@@ -73,7 +73,9 @@ parser.add_argument(
     metavar="N",
     help="number of steps per episode (default: T=60)",
 )
-parser.add_argument("--no-cuda", type=bool, default=True, help="disables CUDA training")
+parser.add_argument(
+    "--no-cuda", type=bool, default=False, help="disables CUDA training"
+)
 parser.add_argument("--estimate-bpr", type=bool, default=True, help="estimate BPR")
 
 args = parser.parse_args()
@@ -94,7 +96,9 @@ env = AMoD(scenario, beta=args.beta)
 # env.cache_paths()
 
 # Initialize A2C-GNN
-model = A2C(env=env, input_size=22, estimate_bpr=args.estimate_bpr).to(device)
+model = A2C(env=env, input_size=22, estimate_bpr=args.estimate_bpr, device=device).to(
+    device
+)
 
 if not args.test:
     #######################################
@@ -141,6 +145,7 @@ if not args.test:
                 action_rl, taylor_params = model.select_action(obs)
             # transform sample from Dirichlet into actual vehicle counts (i.e. (x1*x2*..*xn)*num_vehicles)
             acc_count = dictsum(env.acc, env.time + 1)
+            # print(acc_count)
             # desiredAcc = {
             #     env.region[i]: int(action_rl[i] * dictsum(env.acc, env.time + 1))
             #     for i in range(len(env.region))

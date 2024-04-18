@@ -56,7 +56,11 @@ def solveRebFlow(env, res_path, desiredAcc, gen_cost, CPLEXPATH):
                     if len(v) == 0:
                         continue
                     i, j, k, f = v.split(",")
-                    flow[i, j, int(k)] = float(f)
+                    try:
+                        flow[i, j, int(k)] = float(f)
+                    except ValueError:
+                        # print(f"Unbounded at time {t}")
+                        flow[i, j, int(k)] = -1
     # except ValueError:
     #     with open(out_file, "w") as output_f:
     #         subprocess.check_call(

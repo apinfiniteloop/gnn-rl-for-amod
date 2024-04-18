@@ -8,7 +8,7 @@ import math
 from copy import deepcopy
 from itertools import product
 from collections import defaultdict
-from src.misc.utils import EdgeKeyDict  # , mat2str
+from src.misc.utils import EdgeKeyDict, DefaultList  # , mat2str
 from src.misc.caching import PathCacheManager
 import networkx as nx
 import numpy as np
@@ -41,6 +41,7 @@ class AMoDEnv:
         self.destinations = scenario.destinations
         self.od_pairs = scenario.od_pairs
         self.price = scenario.price
+        self.extra_timesteps = 10
         self.pax_demand = (
             scenario.pax_demand
         )  # {(origin, destination): (demand, price)}
@@ -63,12 +64,14 @@ class AMoDEnv:
             self.reb_flow[edge] = defaultdict(float)
 
         # Vehicle count related variables
-        self.acc = defaultdict(
-            lambda: defaultdict(int)
-        )  # number of vehicles within each node, acc[t][i] <-> number of vehicles at node i at time t
+        self.acc = {
+            node: [0 for i in range(self.total_time + self.extra_timesteps)]
+            for node in self.network.nodes
+            if node[-1] != "*"
+        }  # number of vehicles within each node, acc[i][t] <-> number of vehicles at node i at time t
         self.dacc = defaultdict(
             lambda: defaultdict(int)
-        )  # number of vehicles arriving at each node, dacc[t][i] <-> number of vehicles arriving at node i at time t
+        )  # number of vehicles arriving at each node, dacc[i][t] <-> number of vehicles arriving at node i at time t
         for node in self.network.nodes:
             if node[-1] == "*":
                 continue
@@ -212,7 +215,7 @@ class AMoDEnv:
     def approximate_gen_cost_function(
         self, current_traffic_flow, avg_traffic_flow, coeffs, idx
     ):
-
+        avg_traffic_flow = 0
         if coeffs is not None:
             coeff = coeffs[idx]
             approximation = coeff[0]
@@ -458,7 +461,7 @@ class AMoDEnv:
         for i in self.network.nodes:
             if i[-1] == "*":
                 continue
-            self.acc[i][t + 1] = self.acc[i][t]
+            self.acc[i][t + 1] += self.acc[i][t]
         self.info["served_demand"] = 0  # initialize served demand
         self.info["operating_cost"] = 0  # initialize operating cost
         self.info["revenue"] = 0
@@ -520,7 +523,9 @@ class AMoDEnv:
                 path_travel_time * self.beta * iod_path_demands[pid]
             )
             self.acc[i][t + 1] -= iod_path_demands[pid]
-            self.acc[o][int(t + path_travel_time)] += iod_path_demands[pid]
+            if int(t + path_travel_time) < self.total_time + self.extra_timesteps:
+                self.acc[d][int(t + path_travel_time)] += iod_path_demands[pid]
+            # print(path_travel_time)
             self.info["served_demand"] += self.served_demand[o, d][t]
             self.dacc[d][int(t + path_travel_time)] += self.pax_flow[o, d][
                 int(t + path_travel_time)
@@ -548,40 +553,17 @@ class AMoDEnv:
         t = self.time
         self.reward = 0
         self.rebAction = rebAction
+
         # Rebalancing
-        # for idx, k in enumerate(
-        #     [
-        #         edge
-        #         for edge in self.network.edges(keys=True, data=False)
-        #         if edge[0][-1] != "*" and edge[1][-1] != "*"
-        #     ]
-        # ):
-        #     edge_start, edge_end, edge_key = k
-        #     self.rebAction[k] = min(self.acc[edge_start][t + 1], rebAction[k])
-        #     self.reb_flow[edge_start, edge_end, edge_key][
-        #         t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-        #     ] = self.rebAction[k]
-        #     self.acc[edge_start][t + 1] -= self.rebAction[k]
-        #     self.dacc[edge_end][
-        #         t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-        #     ] += self.reb_flow[edge_start, edge_end, edge_key][
-        #         t + self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-        #     ]
-        #     self.info["rebalancing_cost"] += (
-        #         self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-        #         * self.beta
-        #         * self.rebAction[k]
-        #     )
-        #     self.info["operating_cost"] += (
-        #         self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-        #         * self.beta
-        #         * self.rebAction[k]
-        #     )
-        #     self.reward -= (
-        #         self.rebAction[k]
-        #         * self.beta
-        #         * self.link_mean_travel_time[edge_start, edge_end, edge_key][t]
-        #     )
+        if -1 in rebAction.values():
+            # Model unbounded
+            self.reward = -1e6
+            self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
+            done = t == self.total_time
+            self.info["rebalancing_cost"] += 1e6
+            self.info["operating_cost"] += 1e6
+            return self.obs, self.reward, done, self.info
+
         for idx, node in enumerate(
             [node for node in self.network.nodes if node[-1] != "*"]
         ):
@@ -602,6 +584,12 @@ class AMoDEnv:
             self.acc[node][t + 1] -= total_outflow
             for idx, edge in enumerate(target_outflow.keys()):
                 actual_outflow = ratios[edge] * total_outflow
+                for in_edge in self.network.in_edges(edge[0], keys=True):
+                    if self.network.edges[in_edge]["type"] == "origin":
+                        self.link_demands[in_edge][t] += actual_outflow
+                for out_edge in self.network.out_edges(edge[1], keys=True):
+                    if self.network.edges[out_edge]["type"] == "destination":
+                        self.link_demands[out_edge][t] += actual_outflow
                 self.reb_flow[edge][
                     t + self.link_mean_travel_time[edge][t]
                 ] = actual_outflow
@@ -625,23 +613,20 @@ class AMoDEnv:
                 if edge[0][-1] != "*" and edge[1][-1] != "*"
             ]
         ):
-            if (edge_start, edge_end, edge_key) in self.reb_flow and t in self.reb_flow[
-                edge_start, edge_end, edge_key
-            ]:
+            if (
+                (edge_start, edge_end, edge_key) in self.reb_flow
+                and t in self.reb_flow[edge_start, edge_end, edge_key]
+                and t + self.link_mean_travel_time[(edge_start, edge_end, edge_key)][t]
+                < self.total_time + self.extra_timesteps
+            ):
                 self.acc[edge_end][
-                    t + self.link_mean_travel_time[(edge_start, edge_end, edge_key)][t]
+                    int(
+                        t
+                        + self.link_mean_travel_time[(edge_start, edge_end, edge_key)][
+                            t
+                        ]
+                    )
                 ] += self.reb_flow[edge_start, edge_end, edge_key][t]
-            # if (
-            #     edge_start,
-            #     edge_end,
-            #     edge_key,
-            # ) in self.link_demands and t in self.link_demands[
-            #     edge_start, edge_end, edge_key
-            # ]:
-            #     self.acc[edge_end][t + self.link_mean_travel_time[(edge_start, edge_end, edge_key)[t]]] += self.link_demands[
-            #         edge_start, edge_end, edge_key
-            #     ][t]
-            #     # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
 
         # self.time += 1
         self.obs = (self.acc, self.time, self.dacc, self.pax_demand)
@@ -773,37 +758,37 @@ class AMoDEnv:
                 )
             # If is normal node, update N(x, t) for outgoing edges
             elif len(in_edges) > 1 and len(out_edges) > 1:
-                sum_inout = sum(
-                    [
-                        self.node_transition_demand[node][i][j][t]
-                        for i in in_edges
-                        for j in out_edges
-                    ]
-                )
+                # sum_inout = sum(
+                #     [
+                #         self.node_transition_demand[node][i][j][t]
+                #         for i in in_edges
+                #         for j in out_edges
+                #     ]
+                # )
+                p = 1 / (len(in_edges) * len(out_edges))
                 for in_edge in in_edges:
                     for out_edge in out_edges:
-                        if sum_inout > 1e-6:
-                            p = (
-                                self.node_transition_demand[node][in_edge][out_edge][t]
-                                / sum_inout
-                            )
-                        else:
-                            p = 0
+                        # if sum_inout > 1e-6:
+                        #     p = (
+                        #         self.node_transition_demand[node][in_edge][out_edge][t]
+                        #         / sum_inout
+                        #     )
+                        # else:
+                        #     p = 0
                         if p > 1e-6:
-                            summ = sum(
-                                [
-                                    self.node_transition_demand[node][i][out_edge][t]
-                                    * self.sending_flow[i][t]
-                                    for i in in_edges
-                                ]
-                            )
+                            summ = sum([p * self.sending_flow[i][t] for i in in_edges])
                             if summ > 1e-6:
                                 transition_flow = p * min(
                                     min(
                                         [
-                                            self.receiving_flow[out_edge][t]
-                                            * self.sending_flow[in_edge][t]
-                                            / summ
+                                            (
+                                                self.receiving_flow[out_edge][t]
+                                                * self.sending_flow[in_edge][t]
+                                                / summ
+                                                if self.receiving_flow[out_edge][t]
+                                                != np.inf
+                                                else np.inf
+                                            )
                                         ]
                                     ),
                                     self.sending_flow[in_edge][t],
@@ -1095,7 +1080,7 @@ class Scenario:
         # Example using a simple normal distribution for temporal variation
         return np.exp(-0.5 * ((time - peak_time) / std_dev) ** 2)
 
-    def _generate_init_acc(self, network, acc_scale: tuple = (0, 30)):
+    def _generate_init_acc(self, network, acc_scale: tuple = (0, 50)):
         accs = {
             i: {"accInit": random.randint(acc_scale[0], acc_scale[1])}
             for i in network.nodes

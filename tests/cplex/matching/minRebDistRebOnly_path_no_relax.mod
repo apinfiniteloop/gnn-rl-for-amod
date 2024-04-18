@@ -30,7 +30,7 @@ float desiredVehicles[region] = [i:v|<i,v> in accRLTuple]; // TODO: desiredVehic
 //float accInit[region] = [i:v|<i,v> in accInitTuple];
 float vehicles[region] = [i:v|<i,v> in accInitTuple]; // TODO: vehicles
 
-dvar int+ rebFlow[edges];
+dvar float+ rebFlow[edges];
 
 minimize(sum(e in edges) (rebFlow[e]*time[e]));
 subject to
