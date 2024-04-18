@@ -256,7 +256,10 @@ else:
         log["test_reward"].append(episode_reward)
         log["test_served_demand"].append(episode_served_demand)
         log["test_reb_cost"].append(episode_rebalancing_cost)
-        model.log(log, path=f"./{args.directory}/rl_logs/nyc4/a2c_gnn_test.pth")
+        datetime = time.strftime("%Y-%m-%d-%H-%M-%S")
+        model.log(
+            log, path=f"./{args.directory}/rl_logs/nyc4/a2c_gnn_test_{datetime}.pth"
+        )
         break
 
 

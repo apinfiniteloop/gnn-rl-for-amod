@@ -768,13 +768,6 @@ class AMoDEnv:
                 p = 1 / (len(in_edges) * len(out_edges))
                 for in_edge in in_edges:
                     for out_edge in out_edges:
-                        # if sum_inout > 1e-6:
-                        #     p = (
-                        #         self.node_transition_demand[node][in_edge][out_edge][t]
-                        #         / sum_inout
-                        #     )
-                        # else:
-                        #     p = 0
                         if p > 1e-6:
                             summ = sum([p * self.sending_flow[i][t] for i in in_edges])
                             if summ > 1e-6:
@@ -1054,7 +1047,7 @@ class Scenario:
         return demand, origins, destinations, od_pairs
 
     def _distribute_temporal_demand(
-        self, base_demand, price_scale, peak_time=30, std_dev=20, scale=0.01
+        self, base_demand, price_scale, peak_time=30, std_dev=20, scale=0.2, demand_scale=0.1
     ):
         time_periods = range(60)  # Time steps from 0 to 59
         pax_demand = {time: {} for time in time_periods}
@@ -1069,10 +1062,10 @@ class Scenario:
                         adjusted_demand = od_demand * time_factor
                         price = random.randint(price_scale[0], price_scale[1])
                         pax_demand[time][(origin, destination)] = (
-                            adjusted_demand,
+                            adjusted_demand / demand_scale,
                             price,
                         )
-                        self.demand_input[origin, destination][time] = adjusted_demand
+                        self.demand_input[origin, destination][time] = adjusted_demand / demand_scale
                         self.price[origin, destination][time] = price
         return pax_demand
 
@@ -1080,7 +1073,7 @@ class Scenario:
         # Example using a simple normal distribution for temporal variation
         return np.exp(-0.5 * ((time - peak_time) / std_dev) ** 2)
 
-    def _generate_init_acc(self, network, acc_scale: tuple = (0, 50)):
+    def _generate_init_acc(self, network, acc_scale: tuple = (0, 200)):
         accs = {
             i: {"accInit": random.randint(acc_scale[0], acc_scale[1])}
             for i in network.nodes
