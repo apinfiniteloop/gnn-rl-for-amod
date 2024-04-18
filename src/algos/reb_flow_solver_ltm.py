@@ -44,7 +44,7 @@ def solveRebFlow(env, res_path, desiredAcc, gen_cost, CPLEXPATH):
             env=my_env,
         )
     output_f.close()
-
+    is_unbounded = False
     # 3. collect results from file
     flow = defaultdict(float)
     with open(resfile, "r", encoding="utf8") as file:
@@ -61,25 +61,7 @@ def solveRebFlow(env, res_path, desiredAcc, gen_cost, CPLEXPATH):
                     except ValueError:
                         # print(f"Unbounded at time {t}")
                         flow[i, j, int(k)] = -1
-    # except ValueError:
-    #     with open(out_file, "w") as output_f:
-    #         subprocess.check_call(
-    #             [CPLEXPATH + "oplrun", modfile, datafile],
-    #             stdout=output_f,
-    #             env=my_env,
-    #         )
-    #     output_f.close()
-
-    #     # 3. collect results from file
-    #     flow = defaultdict(float)
-    #     with open(resfile, "r", encoding="utf8") as file:
-    #         for row in file:
-    #             item = row.strip().strip(";").split("=")
-    #             if item[0] == "flow":
-    #                 values = item[1].strip(")]").strip("[(").split(")(")
-    #                 for v in values:
-    #                     if len(v) == 0:
-    #                         continue
-    #                     i, j, k, f = v.split(",")
-    #                     flow[i, j, k] = float(f)
+                        is_unbounded = True
+    if is_unbounded:
+        print("Reb unbounded at time", t)
     return flow

@@ -39,7 +39,7 @@
             <ref name="minRebDistRebOnly_path_no_relax.mod" type="model">
 			</ref>
             			
-            <ref name="data_36.dat" type="data">
+            <ref name="data_50.dat" type="data">
 			</ref>
             		
         </config>
