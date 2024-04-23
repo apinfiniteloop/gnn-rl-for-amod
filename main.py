@@ -38,7 +38,7 @@ parser.add_argument(
 parser.add_argument(
     "--beta",
     type=int,
-    default=0.5,
+    default=1,
     metavar="S",
     help="cost of rebalancing (default: 0.5)",
 )
@@ -62,7 +62,7 @@ parser.add_argument(
 parser.add_argument(
     "--max_episodes",
     type=int,
-    default=500,
+    default=5000,
     metavar="N",
     help="number of episodes to train agent (default: 16k)",
 )
@@ -88,6 +88,7 @@ scenario = Scenario(
     use_sample_network=True,
     sample_network_name="sioux_falls",
     sd=args.seed,
+    total_time=args.max_steps,
     # demand_ratio=args.demand_ratio,
     # json_hr=args.json_hr,
     # json_tstep=args.json_tsetp,
@@ -96,7 +97,7 @@ env = AMoD(scenario, beta=args.beta)
 # env.cache_paths()
 
 # Initialize A2C-GNN
-model = A2C(env=env, input_size=22, estimate_bpr=args.estimate_bpr, device=device).to(
+model = A2C(env=env, input_size=21, estimate_bpr=args.estimate_bpr, device=device).to(
     device
 )
 
@@ -106,20 +107,25 @@ if not args.test:
     #######################################
 
     # Initialize lists for logging
-    log = {"train_reward": [], "train_served_demand": [], "train_reb_cost": []}
+    log = {
+        "train_reward": [],
+        "train_served_demand": [],
+        "train_reb_cost": [],
+        "mean_travel_time": [],
+    }
     train_episodes = args.max_episodes  # set max number of training episodes
     T = args.max_steps  # set episode length
-    epochs = trange(train_episodes)  # epoch iterator
+    epochs = trange(train_episodes, leave=True)  # epoch iterator
     best_reward = -np.inf  # set best reward
     model.train()  # set model in train mode
-    if args.estimate_bpr:
-        taylor_params = None
 
     for i_episode in epochs:
         obs = env.reset(scenario=scenario)  # initialize environment
         episode_reward = 0
         episode_served_demand = 0
         episode_rebalancing_cost = 0
+        if args.estimate_bpr:
+            taylor_params = None
         for step in range(T):
             # Init timer
             start = time.time()
@@ -169,16 +175,19 @@ if not args.test:
                 )
                 for iidx, i in enumerate(env.region)
             }
-            if args.estimate_bpr:
-                env.eval_network_gen_cost(time=step, coeffs=taylor_params)
+            # if args.estimate_bpr:
+            #     env.eval_network_gen_cost(time=step, coeffs=taylor_params)
             # solve minimum rebalancing distance problem (Step 3 in paper)
             # print(f"select action took {time.time()-start} seconds")
             start = time.time()
+            # if step // 5 == 0:
             rebAction = solveRebFlow(
                 env, "scenario_nyc4", desiredAcc, env.gen_cost, args.cplexpath
             )
             # Take action in environment
             new_obs, rebreward, done, info = env.reb_step(rebAction)
+            # else:
+            #     rebreward = 0
             episode_reward += rebreward
             # Store the transition in memory
             model.rewards.append(paxreward + rebreward)
@@ -195,10 +204,17 @@ if not args.test:
                 break
         # perform on-policy backprop
         model.training_step()
-
+        mean_time = np.mean(
+            [
+                value
+                for edge, inner_dict in env.link_mean_travel_time.items()
+                if edge[0][-1] != "*" and edge[1][-1] != "*"
+                for value in inner_dict.values()
+            ]
+        )
         # Send current statistics to screen
         epochs.set_description(
-            f"Episode {i_episode+1} | Reward: {episode_reward:.2f} | ServedDemand: {episode_served_demand:.2f} | Reb. Cost: {episode_rebalancing_cost:.2f}"
+            f"Episode {i_episode+1} | Reward: {episode_reward:.2f} | ServedDemand: {episode_served_demand:.2f} | Reb. Cost: {episode_rebalancing_cost:.2f} | Mean Travel Time: {mean_time:.2f}"
         )
         # Checkpoint best performing model
         if episode_reward >= best_reward:
@@ -208,7 +224,9 @@ if not args.test:
         log["train_reward"].append(episode_reward)
         log["train_served_demand"].append(episode_served_demand)
         log["train_reb_cost"].append(episode_rebalancing_cost)
+        log["mean_travel_time"].append(mean_time)
         model.log(log, path=f"{args.directory}/rl_logs/nyc4/a2c_gnn_test.pth")
+        print(" ")
 else:
     # Load pre-trained model
     model.load_checkpoint(path=f"./{args.directory}/ckpt/nyc4/a2c_gnn.pth")

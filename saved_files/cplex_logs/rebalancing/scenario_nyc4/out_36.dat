@@ -1,0 +1,14 @@
+
+<<< setup
+
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+Tried aggregator 1 time.
+No LP presolve or aggregator reductions.
+Presolve time = 0.01 sec. (0.03 ticks)
+main returns 0
+
+<<< main
+
+
+<<< done
+

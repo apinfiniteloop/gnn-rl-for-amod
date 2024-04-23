@@ -65,18 +65,18 @@ class GNNParser:
         x = (
             torch.cat(
                 (
-                    torch.tensor(
-                        [
-                            obs[4][n][self.env.time + 1] * self.s
-                            for n in [
-                                edge
-                                for edge in self.env.network.edges(keys=True)
-                                if edge[0][-1] != "*" and edge[1][-1] != "*"
-                            ]
-                        ]
-                    )
-                    .view(1, 1, self.env.nedges)
-                    .float(),
+                    # torch.tensor(
+                    #     [
+                    #         obs[4][n][self.env.time] * self.s
+                    #         for n in [
+                    #             edge
+                    #             for edge in self.env.network.edges(keys=True)
+                    #             if edge[0][-1] != "*" and edge[1][-1] != "*"
+                    #         ]
+                    #     ]
+                    # )
+                    # .view(1, 1, self.env.nedges)
+                    # .float(),
                     torch.tensor(
                         [
                             obs[5][n][self.env.time] * self.s
@@ -141,7 +141,7 @@ class GNNParser:
                 dim=1,
             )
             .squeeze(0)
-            .view(22, self.env.nedges)
+            .view(21, self.env.nedges)
             .T
         )
         if self.use_grid:
@@ -174,13 +174,36 @@ class GNNActor(nn.Module):
     `T` is the dimensions of the parameter space for the Taylor's series. Defaults to 0 (disabled). Change to 1 if considering the approximation of BPR.
     """
 
-    def __init__(self, in_channels, out_channels, D=1, T=3):
+    def __init__(self, in_channels, out_channels, D=1):
         super().__init__()
 
         self.conv1 = GCNConv(in_channels, in_channels)
         self.lin1 = nn.Linear(in_channels, 32)
         self.lin2 = nn.Linear(32, 32)
-        self.lin3 = nn.Linear(32, D + T)
+        self.lin3 = nn.Linear(32, D)
+
+    def forward(self, data):
+        out = F.relu(self.conv1(data.x, data.edge_index))
+        x = out + data.x
+        x = F.relu(self.lin1(x))
+        x = F.relu(self.lin2(x))
+        x = self.lin3(x)
+        return x
+
+
+class GNNActorTaylor(nn.Module):
+    """
+    Actor \pi(a_t | s_t) parametrizing the concentration parameters of a Dirichlet Policy.
+    `T` is the dimensions of the parameter space for the Taylor's series. Defaults to 0 (disabled). Change to 1 if considering the approximation of BPR.
+    """
+
+    def __init__(self, in_channels, out_channels, T=3):
+        super().__init__()
+
+        self.conv1 = GCNConv(in_channels, in_channels)
+        self.lin1 = nn.Linear(in_channels, 32)
+        self.lin2 = nn.Linear(32, 32)
+        self.lin3 = nn.Linear(32, T)
 
     def forward(self, data):
         out = F.relu(self.conv1(data.x, data.edge_index))
@@ -250,7 +273,8 @@ class A2C(nn.Module):
         else:
             self.T = 0
 
-        self.actor = GNNActor(self.input_size, self.hidden_size, self.D, self.T)
+        self.actor = GNNActor(self.input_size, self.hidden_size, self.D)
+        self.taylor_actor = GNNActorTaylor(self.input_size, self.hidden_size, self.T)
         self.critic = GNNCritic(self.input_size, self.hidden_size)
         self.obs_parser = GNNParser(self.env)
 
@@ -270,15 +294,13 @@ class A2C(nn.Module):
 
         # actor: computes concentration parameters of a Dirichlet distribution
         a_out = self.actor(x)
-        concentration = F.softplus(a_out[:, : self.D]).reshape(-1) + jitter
+        b_out = self.taylor_actor(x)
+        concentration = F.softplus(a_out).reshape(-1) + jitter
         # Handle case when T=0 (no Taylor series parameters)
-        if (
-            a_out.shape[1] > self.D
-        ):  # Check if there are more outputs beyond Dirichlet parameters
-            taylor_params = F.softplus(a_out[:, self.D :]) + jitter
-            # Extract Taylor series parameters
-        else:
-            taylor_params = None  # Or an appropriate default value indicating no Taylor series parameters
+        # Check if there are more outputs beyond Dirichlet parameters
+        taylor_params = F.softplus(b_out) + jitter
+        # Extract Taylor series parameters
+        # Or an appropriate default value indicating no Taylor series parameters
 
         # critic: estimates V(s_t)
         value = self.critic(x)
@@ -292,18 +314,19 @@ class A2C(nn.Module):
         concentration, taylor_params, value = self.forward(obs)
 
         m = Dirichlet(concentration)
-        n = Dirichlet(taylor_params)
+        n = Dirichlet(taylor_params.T)
 
         action = m.sample()
         taylor_action = n.sample()
         self.saved_actions.append(
             SavedAction(m.log_prob(action) + n.log_prob(taylor_action), value)
+            # SavedAction(m.log_prob(action), value)
         )
         if taylor_params is None:
             return list(action.cpu().numpy())
         else:
             return list(action.cpu().numpy()), list(
-                taylor_params.cpu().detach().numpy()
+                taylor_action.cpu().detach().numpy()
             )
 
     def training_step(self):
@@ -336,8 +359,13 @@ class A2C(nn.Module):
         # take gradient steps
         self.optimizers["a_optimizer"].zero_grad()
         a_loss = torch.stack(policy_losses).sum()
-        a_loss.backward()
+        a_loss.backward(retain_graph=True)
         self.optimizers["a_optimizer"].step()
+
+        self.optimizers["taylor_optimizer"].zero_grad()
+        taylor_loss = torch.stack(policy_losses).sum()
+        taylor_loss.backward()
+        self.optimizers["taylor_optimizer"].step()
 
         self.optimizers["c_optimizer"].zero_grad()
         v_loss = torch.stack(value_losses).sum()
@@ -351,9 +379,11 @@ class A2C(nn.Module):
     def configure_optimizers(self):
         optimizers = dict()
         actor_params = list(self.actor.parameters())
+        taylor_actor_params = list(self.taylor_actor.parameters())
         critic_params = list(self.critic.parameters())
-        optimizers["a_optimizer"] = torch.optim.Adam(actor_params, lr=1e-3)
-        optimizers["c_optimizer"] = torch.optim.Adam(critic_params, lr=1e-3)
+        optimizers["a_optimizer"] = torch.optim.Adam(actor_params, lr=5e-4)
+        optimizers["taylor_optimizer"] = torch.optim.Adam(taylor_actor_params, lr=5e-4)
+        optimizers["c_optimizer"] = torch.optim.Adam(critic_params, lr=5e-4)
         return optimizers
 
     def save_checkpoint(self, path="ckpt.pth"):

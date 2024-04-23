@@ -3,6 +3,7 @@ import subprocess
 import json
 import random
 import math
+import matplotlib.pyplot as plt
 
 # import time as tm
 from copy import deepcopy
@@ -19,7 +20,7 @@ class AMoDEnv:
     Class for AMoD environment. Contains all the functions for the environment.
     """
 
-    def __init__(self, scenario, beta=0.2) -> None:
+    def __init__(self, scenario, beta=0.5) -> None:
         self.scenario = deepcopy(scenario)
         self.network = scenario.G
         self.gen_cost = defaultdict(
@@ -182,7 +183,7 @@ class AMoDEnv:
                 self.cvn[tuple(edge)][
                     int(t + delta_t + edge_attrib["length"] / edge_attrib["w"])
                 ][1]
-                + edge_attrib["k_j"] * edge_attrib["length"]
+                + int(edge_attrib["k_j"]) * edge_attrib["length"]
                 - self.cvn[tuple(edge)][t][0],
                 edge_attrib["q_max"] * delta_t,
             )
@@ -205,17 +206,19 @@ class AMoDEnv:
             if time == 0:
                 self.gen_cost[edge][time] = self.network.edges[edge]["free_flow_time"]
             else:
-                self.gen_cost[edge][time] = self.approximate_gen_cost_function(
+                self.gen_cost[edge][time] = self.network.edges[edge][
+                    "free_flow_time"
+                ] * self.approximate_gen_cost_function(
                     current_traffic_flow=self.link_traffic_flow[edge][time],
                     avg_traffic_flow=np.average(self.link_traffic_flow[edge][:time]),
-                    coeffs=coeffs,
+                    coeffs=np.array(coeffs).T,
                     idx=idx,
                 )
 
     def approximate_gen_cost_function(
         self, current_traffic_flow, avg_traffic_flow, coeffs, idx
     ):
-        avg_traffic_flow = 0
+        # avg_traffic_flow = 0
         if coeffs is not None:
             coeff = coeffs[idx]
             approximation = coeff[0]
@@ -224,7 +227,8 @@ class AMoDEnv:
             for i in range(1, len(coeff)):
                 term = (
                     coeff[i]
-                    * (current_traffic_flow - avg_traffic_flow) ** i
+                    # * (current_traffic_flow - avg_traffic_flow) ** i
+                    * (current_traffic_flow) ** i
                     / math.factorial(i)
                 )
                 approximation += term
@@ -495,11 +499,15 @@ class AMoDEnv:
             for i in range(len(path) - 1):
                 self.node_transition_demand[path[i][1]][path[i]][path[i + 1]][t] += flow
             path_travel_time = 0
+            path_free_flow_time = 0
             for edge_start, edge_end, edge_key in paxPathDict[pid][0]:
                 self.link_demands[(edge_start, edge_end, edge_key)][t] += flow
                 path_travel_time += self.link_mean_travel_time[
                     (edge_start, edge_end, edge_key)
                 ][t]
+                path_free_flow_time += self.network.edges[
+                    (edge_start, edge_end, edge_key)
+                ]["free_flow_time"]
                 # If edge_start is the first node of the path, then add demand to the upstream link of the node with attribute "type" = "origin"
                 if edge_start == paxPathDict[pid][0][0][0]:
                     for edge in self.network.in_edges(edge_start, keys=True):
@@ -544,7 +552,7 @@ class AMoDEnv:
             self.dacc,
             self.pax_demand,
             self.link_demands,
-            self.link_traffic_flow,
+            self.link_mean_travel_time,
         )
         done = False
         return self.obs, max(0, self.reward), done, self.info
@@ -597,12 +605,20 @@ class AMoDEnv:
                     t + self.link_mean_travel_time[edge][t]
                 ] += actual_outflow
                 self.info["rebalancing_cost"] += (
-                    self.link_mean_travel_time[edge][t] * self.beta * actual_outflow
+                    self.link_mean_travel_time[edge][t]
+                    * self.beta
+                    * actual_outflow
+                    # self.network.edges[edge]['free_flow_time'] * self.beta * actual_outflow
                 )
                 self.info["operating_cost"] += (
                     self.link_mean_travel_time[edge][t] * self.beta * actual_outflow
                 )
-                self.reward -= actual_outflow * self.link_mean_travel_time[edge][t]
+                self.reward -= (
+                    actual_outflow
+                    * self.beta
+                    # * self.network.edges[edge]["free_flow_time"]
+                    * self.link_mean_travel_time[edge][t]
+                )
 
         # arrival for the next time step, executed in the last state of a time step
         # this makes the code slightly different from the previous version, where the following codes are executed between matching and rebalancing
@@ -766,6 +782,9 @@ class AMoDEnv:
                 #     ]
                 # )
                 p = 1 / (len(in_edges) * len(out_edges))
+                occurence = [False] * (len(in_edges) * len(out_edges) - 1) + [True]
+                random.shuffle(occurence)
+                idx = 0
                 for in_edge in in_edges:
                     for out_edge in out_edges:
                         if p > 1e-6:
@@ -786,6 +805,22 @@ class AMoDEnv:
                                     ),
                                     self.sending_flow[in_edge][t],
                                 )
+                                if transition_flow < 1:
+                                    transition_flow = occurence[idx] * min(
+                                        min(
+                                            [
+                                                (
+                                                    self.receiving_flow[out_edge][t]
+                                                    * self.sending_flow[in_edge][t]
+                                                    / summ
+                                                    if self.receiving_flow[out_edge][t]
+                                                    != np.inf
+                                                    else np.inf
+                                                )
+                                            ]
+                                        ),
+                                        self.sending_flow[in_edge][t],
+                                    )
                             else:
                                 transition_flow = 0
                         else:
@@ -796,6 +831,7 @@ class AMoDEnv:
                         self.cvn[in_edge][t + delta_t][1] = (
                             self.cvn[in_edge][t][1] + transition_flow
                         )
+                        idx += 1
         self.time += self.time_step
 
     def reset(self, scenario):
@@ -823,26 +859,42 @@ class AMoDEnv:
         if self.cvn[edge][time][0] == 0:
             return self.network.edges[edge]["free_flow_time"]
         else:
-            # # Initialize x to be the time step just before the given time
-            # x = time - 1
-            # # Loop backwards to find the x such that cvn[edge][x][0] == cvn[edge][time][1]
-            # while x >= 0:
-            #     if self.cvn[edge][x][0] == self.cvn[edge][time][1]:
-            #         break  # Found the desired time x
-            #     x -= 1
-            # # If x is found within the valid range, calculate and return the travel time
-            # if x >= 0:
-            #     return time - x
-            # else:
-            #     raise ValueError("No suitable x found within the valid time range.")
-            values = np.array(
-                [self.cvn[edge][x][0] for x in range(len(self.cvn[edge]))]
+            values = np.array([int(self.cvn[edge][x][0]) for x in range(time + 1)])
+            n = np.where(
+                np.abs(values - int(self.cvn[edge][time][1]))
+                == np.abs(values - int(self.cvn[edge][time][1])).min()
             )
-            n = np.argmin(np.abs(values - self.cvn[edge][time][1]))
-            return time - n
+            return max(time - np.max(n), self.network.edges[edge]["free_flow_time"])
 
     def get_link_traffic_flow(self, edge, time):
         return self.cvn[edge][time][0] - self.cvn[edge][time][1]
+
+    def plot_cvn(self, edge):
+        plt.figure(figsize=(6, 5))
+        plt.plot(
+            [t for t in range(self.total_time)],
+            [self.cvn[edge][t][0] for t in range(self.total_time)],
+            marker="^",
+            linestyle="--",
+            label="Upstream end",
+            markersize=4,
+        )
+        plt.plot(
+            [t for t in range(self.total_time)],
+            [self.cvn[edge][t][1] for t in range(self.total_time)],
+            marker="v",
+            linestyle="--",
+            label="Downstream end",
+            markersize=4,
+        )
+        plt.xlabel("Time", fontsize=14)
+        plt.ylabel("N(x, t)", fontsize=14)
+        # plt.xlim(0, 50)
+        # plt.ylim(0, 250)
+        plt.legend()
+        plt.tight_layout()
+        # plt.savefig("images/ltm_numerical_experiment/cd1.pdf")
+        plt.show()
 
 
 class Scenario:
@@ -913,7 +965,7 @@ class Scenario:
         }
         self.ffs = ffs
 
-    def _load_sample_network(self, name, demand_scale=(0, 5), price_scale=(10, 30)):
+    def _load_sample_network(self, name, demand_scale=(0, 5), price_scale=(5, 15)):
         """
         Loads sample network.
         """
@@ -953,7 +1005,9 @@ class Scenario:
                 for time_step in range(self.total_time)
             }
         elif name == "sioux_falls":
-            file_path_network = "TransportationNetworks\SiouxFalls\SiouxFalls_net.tntp"
+            file_path_network = (
+                "TransportationNetworks\SiouxFalls\SiouxFalls_net_new.tntp"
+            )
             file_path_trips = "TransportationNetworks\SiouxFalls\SiouxFalls_trips.tntp"
 
             pax_demand = self._initialize_pax_demand()
@@ -975,7 +1029,7 @@ class Scenario:
 
     def _initialize_pax_demand(self):
         # Initialize the passenger demand dictionary for each time step
-        return {time: {} for time in range(60)}
+        return {time: {} for time in range(self.total_time)}
 
     def _read_network_sioux_falls(self, file_path, backward_speed=10):
         with open(file_path, "r") as file:
@@ -1047,9 +1101,15 @@ class Scenario:
         return demand, origins, destinations, od_pairs
 
     def _distribute_temporal_demand(
-        self, base_demand, price_scale, peak_time=30, std_dev=20, scale=0.2, demand_scale=0.1
+        self,
+        base_demand,
+        price_scale,
+        peak_time=30,
+        std_dev=20,
+        scale=0.4,
+        demand_scale=0.005,
     ):
-        time_periods = range(60)  # Time steps from 0 to 59
+        time_periods = range(self.total_time)  # Time steps from 0 to 59
         pax_demand = {time: {} for time in time_periods}
         for time in time_periods:
             # Example temporal distribution, adjust as needed
@@ -1061,11 +1121,15 @@ class Scenario:
                     if random.random() < scale:
                         adjusted_demand = od_demand * time_factor
                         price = random.randint(price_scale[0], price_scale[1])
+                        if int(adjusted_demand * demand_scale) <= 0:
+                            continue
                         pax_demand[time][(origin, destination)] = (
-                            adjusted_demand / demand_scale,
+                            int(adjusted_demand * demand_scale),
                             price,
                         )
-                        self.demand_input[origin, destination][time] = adjusted_demand / demand_scale
+                        self.demand_input[origin, destination][time] = int(
+                            adjusted_demand * demand_scale
+                        )
                         self.price[origin, destination][time] = price
         return pax_demand
 
@@ -1073,7 +1137,7 @@ class Scenario:
         # Example using a simple normal distribution for temporal variation
         return np.exp(-0.5 * ((time - peak_time) / std_dev) ** 2)
 
-    def _generate_init_acc(self, network, acc_scale: tuple = (0, 200)):
+    def _generate_init_acc(self, network, acc_scale: tuple = (0, 88)):
         accs = {
             i: {"accInit": random.randint(acc_scale[0], acc_scale[1])}
             for i in network.nodes

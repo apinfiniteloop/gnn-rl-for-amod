@@ -37,7 +37,7 @@ float accInit[region] = [i:v|<i,v> in accInitTuple];
 float demand[demandPath] = [<i,o,d,id>:de|<i,o,d,id,c,de,p> in ioPathTuple];
 float price[demandPath] = [<i,o,d,id>:p|<i,o,d,id,c,de,p> in ioPathTuple];
 float cost[demandPath] = [<i,o,d,id>:c|<i,o,d,id,c,de,p> in ioPathTuple];
-dvar int+ demandFlow[demandPath];
+dvar float+ demandFlow[demandPath];
 maximize(sum(e in demandPath) demandFlow[e]*(price[e]-cost[e]));
 subject to
 {
